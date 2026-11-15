@@ -2,104 +2,83 @@ import { useState } from "react";
 import { downloadResource } from "../services/resourceService";
 import { useToast } from "../hooks/ToastContext";
 import Icon from "./Icons";
+import { Spinner, fileFormatFromUrl, resourceTypeInfo } from "./ui";
+
+function isExternalUrl(url) {
+  return /^https?:\/\//i.test(url || "");
+}
 
 export default function ResourceCard({ resource }) {
   const toast = useToast();
-  const [downloads, setDownloads] = useState(resource.downloadCount || 0);
+  const [downloads, setDownloads] = useState(resource.downloadCount);
   const [downloading, setDownloading] = useState(false);
 
-  const getTypeBadge = (type) => {
-    switch (type?.toUpperCase()) {
-      case "NOTES":
-        return <span className="badge badge-blue">Lecture Notes</span>;
-      case "EXERCISES":
-        return <span className="badge badge-cyan">Exercises</span>;
-      case "PROJECTS":
-        return <span className="badge badge-amber">Projects</span>;
-      case "CHEATSHEET":
-        return <span className="badge badge-green">Cheatsheet</span>;
-      default:
-        return <span className="badge badge-gray">{type || "Resource"}</span>;
-    }
-  };
+  const type = resourceTypeInfo(resource.resourceType);
+  const format = resource.fileFormat || fileFormatFromUrl(resource.fileUrl);
 
   const handleDownload = async () => {
+    if (!resource.id) return;
     setDownloading(true);
     try {
-      if (resource.id) {
-        const res = await downloadResource(resource.id);
-        if (res.success && res.data?.downloadCount) {
-          setDownloads(res.data.downloadCount);
-        } else {
-          setDownloads((prev) => prev + 1);
-        }
-      } else {
-        setDownloads((prev) => prev + 1);
+      // The download is only recorded/started once the Resource API confirms it
+      const res = await downloadResource(resource.id);
+      if (!res.success) {
+        toast.error(res.error || "This resource couldn't be downloaded. Please try again.");
+        return;
       }
+      if (typeof res.data?.downloadCount === "number") setDownloads(res.data.downloadCount);
 
-      // Trigger synthetic download of documentation / resource
-      const content = `# ${resource.title}\n\nType: ${resource.resourceType}\nDescription: ${resource.description}\n\nDownloaded from Student Learning Portal • Resource Microservice Port 8083.\nGenerated on: ${new Date().toISOString()}`;
-      const blob = new Blob([content], { type: "text/markdown;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", `${(resource.title || "resource").toLowerCase().replace(/\s+/g, "-")}.md`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      toast.success(`Downloaded "${resource.title}". Metric recorded in Resource Service.`);
+      if (isExternalUrl(resource.fileUrl)) {
+        window.open(resource.fileUrl, "_blank", "noopener,noreferrer");
+      } else {
+        // No hosted file is attached — provide a summary sheet of the resource
+        const content = `# ${resource.title}\n\nType: ${type.label}\n\n${resource.description || ""}\n\nDownloaded from Student Learning Portal on ${new Date().toLocaleString()}.\n`;
+        const blob = new Blob([content], { type: "text/markdown;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.setAttribute("download", `${(resource.title || "resource").toLowerCase().replace(/[^a-z0-9]+/g, "-")}.md`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
+      toast.success(`${resource.title} is downloading.`, "Download started");
     } catch {
-      setDownloads((prev) => prev + 1);
-      toast.info(`Resource access recorded for "${resource.title}".`);
+      toast.error("This resource couldn't be downloaded. Please try again.");
     } finally {
       setDownloading(false);
     }
   };
 
   return (
-    <article className="card resource-card">
+    <article className="card card-interactive">
       <div className="card-header-row">
-        <div>{getTypeBadge(resource.resourceType)}</div>
-        <span
-          style={{
-            fontSize: "0.8125rem",
-            color: "var(--text-muted)",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 4
-          }}
-        >
-          <Icon name="download" size={14} />
-          {downloads} downloads
+        <span className={`badge ${type.badge}`}>
+          <Icon name={type.icon} size={12} />
+          {type.label}
         </span>
+        {format && <span className="badge badge-neutral badge-mono">{format}</span>}
       </div>
 
       <h3 className="card-title">{resource.title}</h3>
-      <p className="card-desc">{resource.description}</p>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <span className="badge badge-gray">
-          {resource.fileFormat || (resource.fileUrl?.endsWith(".pdf") ? "PDF" : "ZIP")}
-        </span>
-        {resource.fileSize && (
-          <span className="badge badge-gray">{resource.fileSize}</span>
-        )}
-      </div>
+      {resource.description && <p className="card-desc">{resource.description}</p>}
 
       <div className="card-footer">
-        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-          Resource Service (8083)
+        <span className="small muted">
+          {typeof downloads === "number" ? `${downloads.toLocaleString()} download${downloads === 1 ? "" : "s"}` : ""}
+          {resource.fileSize ? ` · ${resource.fileSize}` : ""}
         </span>
         <button
           type="button"
-          className="btn btn-outline btn-sm"
+          className="btn btn-secondary btn-sm"
           onClick={handleDownload}
-          disabled={downloading}
+          disabled={downloading || !resource.id}
+          aria-label={`Download ${resource.title}`}
+          aria-busy={downloading}
         >
-          <Icon name="download" size={14} />
-          {downloading ? "Accessing..." : "Download Asset"}
+          {downloading ? <Spinner /> : <Icon name="download" size={14} />}
+          {downloading ? "Preparing…" : "Download"}
         </button>
       </div>
     </article>

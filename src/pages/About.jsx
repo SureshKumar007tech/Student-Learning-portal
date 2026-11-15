@@ -1,319 +1,247 @@
 import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import useGreeting from "../hooks/useGreeting";
 import useLocalStorage from "../hooks/useLocalStorage";
 import { useAuth } from "../hooks/AuthContext";
-import { recordVisit, checkGatewayHealth, getGatewayStatus } from "../services/authService";
+import { useTheme } from "../hooks/ThemeContext";
+import { recordVisit, checkGatewayHealth } from "../services/authService";
 import { useToast } from "../hooks/ToastContext";
 import Icon from "../components/Icons";
+import FocusDemo from "../components/FocusDemo";
+import { Alert, PageHeader, SectionHeader, Spinner } from "../components/ui";
+
+const FEATURES = [
+  { icon: "book", title: "Find and join courses", desc: "Browse the catalogue by level and enroll in the courses you need." },
+  { icon: "bar-chart", title: "Track your progress", desc: "See every enrolled course on your dashboard and update progress as you go." },
+  { icon: "file-text", title: "Download study materials", desc: "Lecture notes, exercises, starter projects and quick-reference sheets." },
+  { icon: "calendar", title: "Join events and get help", desc: "Reserve seats at workshops and showcases, or ask student support a question." }
+];
+
+const SERVICES = [
+  { key: "gateway", name: "API Gateway", port: "8080", db: "—", role: "Single entry point: routing, CORS, JWT validation" },
+  { key: "user-service", name: "User Service", port: "8081", db: "user_db", role: "Registration, sign-in, tokens, student profiles" },
+  { key: "course-service", name: "Course Service", port: "8082", db: "course_db", role: "Course catalogue, enrollments, progress" },
+  { key: "resource-service", name: "Resource Service", port: "8083", db: "resource_db", role: "Study materials and download counts" },
+  { key: "engagement-service", name: "Engagement Service", port: "8084", db: "engagement_db", role: "Events, registrations, support inquiries" }
+];
 
 export default function About() {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
+  const { darkMode } = useTheme();
   const toast = useToast();
+  const location = useLocation();
 
   const [name, setName] = useState(user?.firstName || "Student");
   const greeting = useGreeting(name);
   const [visits, setVisits] = useLocalStorage("portalVisits", 1);
 
-  // Microservice health check state
-  const [healthStatus, setHealthStatus] = useState(null);
-  const [gatewayInfo, setGatewayInfo] = useState(null);
-  const [pinging, setPinging] = useState(false);
+  const [health, setHealth] = useState({ status: "idle", data: null, error: null, checkedAt: null });
+  const [recordingVisit, setRecordingVisit] = useState(false);
 
   useEffect(() => {
-    if (user?.firstName) {
-      setName(user.firstName);
-    }
+    if (user?.firstName) setName(user.firstName);
   }, [user]);
 
-  const handleIncreaseVisits = () => {
+  // Support /about#how-it-works links
+  useEffect(() => {
+    if (!location.hash) return;
+    const el = document.getElementById(location.hash.slice(1));
+    if (el) window.setTimeout(() => el.scrollIntoView({ block: "start" }), 0);
+  }, [location.hash]);
+
+  const handleIncreaseVisits = async () => {
     setVisits((prev) => prev + 1);
-    recordVisit(user?.userId || 1);
-    toast.success("Visit count updated in localStorage and User Service!");
+    setRecordingVisit(true);
+    const res = await recordVisit(user?.userId || 1);
+    setRecordingVisit(false);
+    if (res.success) toast.success("Saved in this browser and recorded by the User Service.", "Visit recorded");
+    else toast.warning(`Saved in this browser only — the User Service didn't accept it (${res.error}).`, "Saved locally");
   };
 
   const handlePingServices = async () => {
-    setPinging(true);
-    try {
-      const [healthRes, statusRes] = await Promise.all([
-        checkGatewayHealth(),
-        getGatewayStatus()
-      ]);
-
-      if (healthRes.success) {
-        setHealthStatus(healthRes.data);
-      } else {
-        setHealthStatus({
-          gateway: "UP (Port 8080)",
-          "user-service": "UP (Port 8081)",
-          "course-service": "UP (Port 8082)",
-          "resource-service": "UP (Port 8083)",
-          "engagement-service": "UP (Port 8084)"
-        });
-      }
-
-      if (statusRes.success) {
-        setGatewayInfo(statusRes.data);
-      }
-      toast.info("Health ping completed for all microservice nodes.");
-    } catch {
-      setHealthStatus({
-        gateway: "UP (Simulated)",
-        "user-service": "UP (Port 8081)",
-        "course-service": "UP (Port 8082)",
-        "resource-service": "UP (Port 8083)",
-        "engagement-service": "UP (Port 8084)"
-      });
-      toast.info("Offline health simulation checked.");
-    } finally {
-      setPinging(false);
+    setHealth((prev) => ({ ...prev, status: "loading", error: null }));
+    const res = await checkGatewayHealth();
+    if (res.success && res.data) {
+      setHealth({ status: "ready", data: res.data, error: null, checkedAt: new Date() });
+    } else {
+      setHealth({ status: "error", data: null, error: res.error, checkedAt: new Date() });
     }
   };
 
+  const statusFor = (key) => {
+    if (health.status === "idle") return { label: "Not checked", cls: "badge-neutral" };
+    if (health.status === "loading") return { label: "Checking…", cls: "badge-neutral" };
+    if (health.status === "error") return { label: "Unreachable", cls: "badge-danger" };
+    const v = health.data?.[key];
+    if (!v) return { label: "Not reported", cls: "badge-neutral" };
+    return String(v).toUpperCase().startsWith("UP") ? { label: "Up", cls: "badge-success" } : { label: "Down", cls: "badge-danger" };
+  };
+
   return (
-    <div>
-      <div className="section-header">
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <span className="badge badge-blue">University Major Project</span>
-            <span className="badge badge-green">React 19 + Spring Boot</span>
-          </div>
-          <h2 className="section-title">System Architecture & Viva Examination Lab</h2>
-          <p className="section-subtitle">
-            Comprehensive demonstration of React 19 hooks syllabus and genuine microservices architecture.
-          </p>
+    <div className="page">
+      <PageHeader
+        eyebrow="About"
+        title="About the Student Learning Portal"
+        lead="The portal brings your courses, study materials and campus events together, so you spend less time searching and more time learning."
+        actions={
+          <Link to="/contact" className="btn btn-secondary">
+            <Icon name="help-circle" size={16} />
+            Contact support
+          </Link>
+        }
+      />
+
+      <section className="section" aria-labelledby="features-heading">
+        <SectionHeader id="features-heading" title="What you can do here" />
+        <div className="grid-4">
+          {FEATURES.map((f) => (
+            <div key={f.title} className="card">
+              <span className="feature-icon"><Icon name={f.icon} size={20} /></span>
+              <h3 className="card-title" style={{ fontSize: "var(--text-md)" }}>{f.title}</h3>
+              <p className="small" style={{ color: "var(--text-secondary)" }}>{f.desc}</p>
+            </div>
+          ))}
         </div>
-      </div>
+      </section>
 
-      {/* Greeting & Custom Hook Demo */}
-      <div
-        className="card"
-        style={{
-          background: "linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-surface-subtle) 100%)",
-          marginBottom: 32,
-          borderLeft: "4px solid var(--accent-primary)"
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16 }}>
-          <div>
-            <span style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--accent-primary)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Custom Hook Output (useGreeting + useDebugValue)
-            </span>
-            <h3 style={{ fontSize: "1.5rem", fontWeight: 800, margin: "4px 0 8px", color: "var(--text-primary)" }}>
-              "{greeting}"
-            </h3>
-            <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--text-secondary)" }}>
-              Changes to the input below immediately recompute the memoized greeting and label it in React DevTools.
-            </p>
-          </div>
+      {/* Architecture & diagnostics — technical details live here, not in student-facing pages */}
+      <section className="section" id="how-it-works" aria-labelledby="arch-heading" style={{ scrollMarginTop: 90 }}>
+        <SectionHeader
+          id="arch-heading"
+          title="How it's built"
+          lead="A React single-page app talks to an API gateway, which routes requests to four independent Spring Boot services — each with its own database."
+          action={
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handlePingServices} disabled={health.status === "loading"} aria-busy={health.status === "loading"}>
+              {health.status === "loading" ? <Spinner /> : <Icon name="server" size={14} />}
+              {health.status === "loading" ? "Checking services…" : "Check service status"}
+            </button>
+          }
+        />
 
-          <div style={{ minWidth: 260 }}>
-            <label className="form-label">Test Input for useGreeting:</label>
-            <input
-              className="form-input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Enter name..."
-            />
-          </div>
+        {health.status === "error" && (
+          <Alert type="error" title="The gateway couldn't be reached">
+            {health.error} Service statuses below are unknown until the gateway responds.
+          </Alert>
+        )}
+
+        <div className="table-wrapper">
+          <table className="data-table table-responsive">
+            <caption className="visually-hidden">Services and their status</caption>
+            <thead>
+              <tr>
+                <th scope="col">Service</th>
+                <th scope="col">Port</th>
+                <th scope="col">Database</th>
+                <th scope="col">Responsibility</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody aria-live="polite">
+              {SERVICES.map((svc) => {
+                const s = statusFor(svc.key);
+                return (
+                  <tr key={svc.key}>
+                    <td data-label="Service" className="cell-strong">{svc.name}</td>
+                    <td data-label="Port"><code>{svc.port}</code></td>
+                    <td data-label="Database">{svc.db === "—" ? "Stateless" : <code>{svc.db}</code>}</td>
+                    <td data-label="Responsibility" className="cell-wrap">{svc.role}</td>
+                    <td data-label="Status"><span className={`badge ${s.cls}`}>{s.label}</span></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-      </div>
+        {health.checkedAt && (
+          <p className="small muted">Last checked {health.checkedAt.toLocaleTimeString()}.</p>
+        )}
+      </section>
 
-      {/* React Syllabus Topics Grid */}
-      <div className="section-header">
-        <h3 className="section-title" style={{ fontSize: "1.25rem" }}>
-          React 19 Hook Demonstrations
-        </h3>
-      </div>
+      {/* Developer / examiner section: React syllabus demonstrations */}
+      <section className="section" aria-labelledby="lab-heading">
+        <SectionHeader
+          id="lab-heading"
+          title="React hooks lab"
+          lead="For developers and examiners: live demonstrations of the React concepts used throughout the portal."
+        />
 
-      <div className="grid-cols-3" style={{ marginBottom: 36 }}>
-        {/* useLocalStorage Card */}
         <div className="card">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-            <div style={{ width: 36, height: 36, borderRadius: "var(--radius-md)", backgroundColor: "var(--accent-cyan-subtle)", color: "var(--accent-cyan-hover)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Icon name="award" size={18} />
+          <div className="row-between" style={{ alignItems: "flex-end", gap: 20 }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="eyebrow">Custom hook · useGreeting + useDebugValue</div>
+              <p style={{ fontSize: "var(--text-xl)", fontWeight: 700 }} aria-live="polite">“{greeting}”</p>
+              <p className="small" style={{ color: "var(--text-secondary)", marginTop: 4 }}>
+                Typing recomputes the memoised greeting; the hook labels itself in React DevTools.
+              </p>
+            </div>
+            <div className="form-group" style={{ minWidth: 240, margin: 0 }}>
+              <label className="form-label" htmlFor="greeting-name">Name</label>
+              <input id="greeting-name" className="form-input" value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+          </div>
+        </div>
+
+        <div className="grid-3">
+          <div className="card">
+            <div className="eyebrow">Topic 14 · useLocalStorage</div>
+            <h3 className="card-title" style={{ fontSize: "var(--text-md)" }}>Persisted visit counter</h3>
+            <p className="small" style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
+              Stored in this browser and also sent to the User Service.
+            </p>
+            <div className="fact" style={{ marginBottom: 16 }}>
+              <div className="fact-label">Visits in this browser</div>
+              <div className="stat-value" style={{ fontSize: "1.5rem" }}>{visits}</div>
+            </div>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handleIncreaseVisits} disabled={recordingVisit} style={{ alignSelf: "flex-start", marginTop: "auto" }}>
+              {recordingVisit ? <Spinner /> : <Icon name="plus" size={14} />}
+              Record a visit
+            </button>
+          </div>
+
+          <div className="card">
+            <div className="eyebrow">Topic 12 · useContext</div>
+            <h3 className="card-title" style={{ fontSize: "var(--text-md)" }}>Shared theme & auth state</h3>
+            <p className="small" style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
+              Theme, signed-in user and toasts are provided once and read anywhere.
+            </p>
+            <div className="fact small">
+              <div>Signed in as: <strong>{user?.username || "Guest"}</strong></div>
+              <div>Theme: <strong>{darkMode ? "Dark" : "Light"}</strong></div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="eyebrow">Topics 10 & 13 · useMemo, useRef</div>
+            <h3 className="card-title" style={{ fontSize: "var(--text-md)" }}>Memoised filtering</h3>
+            <p className="small" style={{ color: "var(--text-secondary)", marginBottom: 16 }}>
+              <code>useMemo</code> caches filtered course lists; <code>useRef</code> moves focus to the first invalid form field.
+            </p>
+            <div className="code-block">useMemo(() =&gt; filter(courses), [level, query])</div>
+          </div>
+        </div>
+
+        <FocusDemo />
+
+        <div className="card">
+          <h3 className="card-title" style={{ fontSize: "var(--text-md)" }}>Architecture Q&amp;A</h3>
+          <div className="grid-2" style={{ marginTop: 8 }}>
+            <div>
+              <h4 style={{ fontSize: "var(--text-sm)", color: "var(--accent-primary-text)", marginBottom: 4 }}>Why a database per service?</h4>
+              <p className="small" style={{ color: "var(--text-secondary)" }}>
+                Each service owns its schema. The Course Service never reads the <code>users</code> table; identity arrives as verified
+                headers (<code>X-User-Id</code>, <code>X-User-Role</code>) added by the gateway after it validates the JWT.
+              </p>
             </div>
             <div>
-              <h4 style={{ margin: 0, fontSize: "0.9375rem", fontWeight: 700 }}>useLocalStorage</h4>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Syllabus Topic 14</span>
+              <h4 style={{ fontSize: "var(--text-sm)", color: "var(--accent-primary-text)", marginBottom: 4 }}>Where is useDebugValue used?</h4>
+              <p className="small" style={{ color: "var(--text-secondary)" }}>
+                Both <code>useGreeting</code> and <code>useLocalStorage</code> call <code>useDebugValue</code>, so their values show up in the
+                React DevTools Components tab.
+              </p>
             </div>
-          </div>
-          <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 16px" }}>
-            Persists portal visits state across browser sessions and notifies User Microservice (Port 8081).
-          </p>
-          <div style={{ background: "var(--bg-surface-subtle)", padding: 12, borderRadius: "var(--radius-md)", marginBottom: 16 }}>
-            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Session Visit Metric</div>
-            <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "var(--accent-primary)" }}>
-              {visits} Visits
-            </div>
-          </div>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={handleIncreaseVisits}
-          >
-            Increment Visits
-          </button>
-        </div>
-
-        {/* useContext & Theme Card */}
-        <div className="card">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-            <div style={{ width: 36, height: 36, borderRadius: "var(--radius-md)", backgroundColor: "var(--status-warning-bg)", color: "var(--status-warning)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Icon name="sun" size={18} />
-            </div>
-            <div>
-              <h4 style={{ margin: 0, fontSize: "0.9375rem", fontWeight: 700 }}>useContext (Theme & Auth)</h4>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Syllabus Topic 12</span>
-            </div>
-          </div>
-          <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 16px" }}>
-            Provides global reactive state for dark/light theme, user authentication tokens, and toast alerts.
-          </p>
-          <div style={{ background: "var(--bg-surface-subtle)", padding: 12, borderRadius: "var(--radius-md)", marginBottom: 16, fontSize: "0.8125rem" }}>
-            <div>Active User: <strong>{user?.username || "Guest"}</strong></div>
-            <div>Role: <strong>{user?.role || "ANONYMOUS"}</strong></div>
-          </div>
-          <span className="badge badge-green" style={{ width: "fit-content" }}>Context Reactive</span>
-        </div>
-
-        {/* useMemo & useRef Card */}
-        <div className="card">
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-            <div style={{ width: 36, height: 36, borderRadius: "var(--radius-md)", backgroundColor: "var(--status-success-bg)", color: "var(--status-success)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Icon name="code" size={18} />
-            </div>
-            <div>
-              <h4 style={{ margin: 0, fontSize: "0.9375rem", fontWeight: 700 }}>useMemo & useRef</h4>
-              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Syllabus Topic 10 & 13</span>
-            </div>
-          </div>
-          <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: "0 0 16px" }}>
-            <code>useMemo</code> avoids expensive course filtering recomputations. <code>useRef</code> accesses imperative DOM inputs in forms.
-          </p>
-          <div style={{ background: "var(--bg-surface-subtle)", padding: 12, borderRadius: "var(--radius-md)", marginBottom: 16, fontSize: "0.75rem", fontFamily: "monospace" }}>
-            useMemo(() =&gt; filterCourses(), [lvl, q])
-          </div>
-          <span className="badge badge-blue" style={{ width: "fit-content" }}>Performance Optimized</span>
-        </div>
-      </div>
-
-      {/* Distributed Architecture Matrix & Live Health Check */}
-      <div className="section-header">
-        <div>
-          <h3 className="section-title" style={{ fontSize: "1.25rem" }}>
-            Microservices Verification & Downstream Health
-          </h3>
-          <p className="section-subtitle">
-            Ping API Gateway (Port 8080) to inspect real-time connectivity with all 4 downstream Spring Boot services.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          onClick={handlePingServices}
-          disabled={pinging}
-        >
-          <Icon name="server" size={14} />
-          {pinging ? "Pinging Cluster..." : "Ping Microservices Cluster"}
-        </button>
-      </div>
-
-      <div className="table-wrapper" style={{ marginBottom: 36 }}>
-        <table className="enterprise-table">
-          <thead>
-            <tr>
-              <th>Microservice Name</th>
-              <th>Server Port</th>
-              <th>Exclusive Database</th>
-              <th>Domain Capability</th>
-              <th>Health Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>API Gateway</strong></td>
-              <td><code>8080</code></td>
-              <td>Stateless (Routing)</td>
-              <td>Central CORS, Reverse Proxy, JWT Validation</td>
-              <td>
-                <span className="badge badge-green">
-                  {healthStatus?.gateway || "ONLINE (8080)"}
-                </span>
-              </td>
-            </tr>
-            <tr>
-              <td><strong>User Service</strong></td>
-              <td><code>8081</code></td>
-              <td><code>user_db</code></td>
-              <td>Registration, Login, JWT Generation, Student Profiles</td>
-              <td>
-                <span className="badge badge-green">
-                  {healthStatus?.["user-service"] || "ONLINE (8081)"}
-                </span>
-              </td>
-            </tr>
-            <tr>
-              <td><strong>Course Service</strong></td>
-              <td><code>8082</code></td>
-              <td><code>course_db</code></td>
-              <td>Courses Catalogue, Student Enrollments, Progress Sync</td>
-              <td>
-                <span className="badge badge-green">
-                  {healthStatus?.["course-service"] || "ONLINE (8082)"}
-                </span>
-              </td>
-            </tr>
-            <tr>
-              <td><strong>Resource Service</strong></td>
-              <td><code>8083</code></td>
-              <td><code>resource_db</code></td>
-              <td>Lecture Notes, Exercises, Cheatsheets, Download Counter</td>
-              <td>
-                <span className="badge badge-green">
-                  {healthStatus?.["resource-service"] || "ONLINE (8083)"}
-                </span>
-              </td>
-            </tr>
-            <tr>
-              <td><strong>Engagement Service</strong></td>
-              <td><code>8084</code></td>
-              <td><code>engagement_db</code></td>
-              <td>Academic Events, Workshop RSVPs, Support Inquiries</td>
-              <td>
-                <span className="badge badge-green">
-                  {healthStatus?.["engagement-service"] || "ONLINE (8084)"}
-                </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      {/* Viva Examiner Architectural Q&A Reference */}
-      <div className="card">
-        <h3 style={{ fontSize: "1.125rem", fontWeight: 700, margin: "0 0 16px" }}>
-          Viva Examiner Q&A Guide
-        </h3>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-          <div>
-            <h4 style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--accent-primary)", margin: "0 0 4px" }}>
-              Q: Why is Database-Per-Service critical here?
-            </h4>
-            <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: 0 }}>
-              Each microservice owns its schema exclusively. Course service cannot access `users` table directly; identity is communicated via verified HTTP headers (`X-User-Id`, `X-User-Role`) injected by the API Gateway.
-            </p>
-          </div>
-
-          <div>
-            <h4 style={{ fontSize: "0.875rem", fontWeight: 700, color: "var(--accent-primary)", margin: "0 0 4px" }}>
-              Q: Where is custom hook useDebugValue used?
-            </h4>
-            <p style={{ fontSize: "0.8125rem", color: "var(--text-secondary)", lineHeight: 1.5, margin: 0 }}>
-              Both <code>useGreeting</code> and <code>useLocalStorage</code> declare <code>useDebugValue(...)</code>, allowing examiners to inspect custom hook labels directly inside React DevTools Components tab.
-            </p>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

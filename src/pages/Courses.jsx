@@ -1,28 +1,49 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import CourseCard from "../components/CourseCard";
 import Icon from "../components/Icons";
+import { EmptyState, ErrorState, LoadingGrid, PageHeader } from "../components/ui";
 
-export default function Courses({ courses = [], onCourseClick }) {
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedLevel, setSelectedLevel] = useState("All");
+const LEVELS = ["All", "Beginner", "Intermediate", "Advanced"];
+
+export default function Courses({
+  coursesState,
+  filteredCourses = [],
+  selectedLevel = "All",
+  onLevelChange,
+  enrolledCourseIds,
+  onEnrolled,
+  onRetry
+}) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") || "");
   const [sortBy, setSortBy] = useState("default");
 
-  const levels = ["All", "Beginner", "Intermediate", "Advanced"];
-
-  // useMemo: Avoid recalculating the filtered list unnecessarily (Syllabus topic 13)
-  const filteredCourses = useMemo(() => {
-    let result = [...courses];
-
-    // Filter by level
-    if (selectedLevel !== "All") {
-      result = result.filter(
-        (c) => c.level?.toLowerCase() === selectedLevel.toLowerCase()
-      );
+  // Keep the search box in sync when arriving from global search
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (q !== null) {
+      setSearchQuery(q);
+      onLevelChange("All");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
+  const updateSearch = (value) => {
+    setSearchQuery(value);
+    if (searchParams.has("q")) {
+      searchParams.delete("q");
+      setSearchParams(searchParams, { replace: true });
+    }
+  };
+
+  const allCourses = coursesState.data;
+
+  // useMemo: avoid recalculating the visible list unnecessarily (Syllabus topic 13)
+  const visibleCourses = useMemo(() => {
+    let result = [...filteredCourses];
+    const q = searchQuery.toLowerCase().trim();
+    if (q) {
       result = result.filter(
         (c) =>
           c.title?.toLowerCase().includes(q) ||
@@ -30,112 +51,128 @@ export default function Courses({ courses = [], onCourseClick }) {
           c.description?.toLowerCase().includes(q)
       );
     }
-
-    // Sort
-    if (sortBy === "duration-asc") {
-      result.sort((a, b) => (a.durationHours || 0) - (b.durationHours || 0));
-    } else if (sortBy === "duration-desc") {
-      result.sort((a, b) => (b.durationHours || 0) - (a.durationHours || 0));
-    } else if (sortBy === "title-asc") {
-      result.sort((a, b) => a.title.localeCompare(b.title));
-    }
-
+    if (sortBy === "duration-asc") result.sort((a, b) => (a.durationHours || 0) - (b.durationHours || 0));
+    else if (sortBy === "duration-desc") result.sort((a, b) => (b.durationHours || 0) - (a.durationHours || 0));
+    else if (sortBy === "title-asc") result.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
     return result;
-  }, [courses, selectedLevel, searchQuery, sortBy]);
+  }, [filteredCourses, searchQuery, sortBy]);
+
+  const hasFilters = selectedLevel !== "All" || searchQuery.trim() !== "";
+
+  const resetFilters = () => {
+    onLevelChange("All");
+    updateSearch("");
+  };
 
   return (
-    <div>
-      <div className="section-header">
-        <div>
-          <h2 className="section-title">Academic Course Catalogue</h2>
-          <p className="section-subtitle">
-            Distributed curriculum loaded dynamically from Course Microservice (Port 8082).
-          </p>
-        </div>
-        <span className="badge badge-blue">
-          {filteredCourses.length} of {courses.length} Courses
-        </span>
-      </div>
+    <div className="page">
+      <PageHeader
+        eyebrow="Course catalogue"
+        title="Find your next course"
+        lead="Browse courses by level, read what each one covers, and enroll in a click. Enrolled courses appear on your dashboard."
+      />
 
-      {/* Filter & Search Toolbar */}
-      <div className="toolbar-container">
-        {/* Level Filter Pills */}
-        <div className="filter-pills">
-          <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginRight: 4, display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <Icon name="filter" size={14} /> Level:
-          </span>
-          {levels.map((lvl) => (
-            <button
-              key={lvl}
-              type="button"
-              className={`filter-pill ${selectedLevel === lvl ? "active" : ""}`}
-              onClick={() => setSelectedLevel(lvl)}
-            >
-              {lvl}
+      <section className="section" aria-labelledby="course-results-heading">
+        <h2 id="course-results-heading" className="visually-hidden">Course results</h2>
+
+        <div className="toolbar" role="search" aria-label="Filter courses">
+          <div className="toolbar-group">
+            <div>
+              <span className="toolbar-label" id="level-filter-label">Level</span>
+              <div className="segmented" role="group" aria-labelledby="level-filter-label">
+                {LEVELS.map((lvl) => (
+                  <button key={lvl} type="button" aria-pressed={selectedLevel === lvl} onClick={() => onLevelChange(lvl)}>
+                    {lvl === "All" ? "All levels" : lvl}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="toolbar-group" style={{ flex: 1, justifyContent: "flex-end" }}>
+            <div className="search-field">
+              <label htmlFor="course-search" className="toolbar-label">Search</label>
+              <div style={{ position: "relative" }}>
+                <Icon name="search" size={16} />
+                <input
+                  id="course-search"
+                  type="search"
+                  className="form-input"
+                  value={searchQuery}
+                  onChange={(e) => updateSearch(e.target.value)}
+                  placeholder="Title, code or topic"
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="course-sort" className="toolbar-label">Sort by</label>
+              <select id="course-sort" className="form-select form-select-sm" value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                <option value="default">Recommended</option>
+                <option value="title-asc">Title (A–Z)</option>
+                <option value="duration-asc">Shortest first</option>
+                <option value="duration-desc">Longest first</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {coursesState.status === "ready" && (
+          <div className="row-between">
+            <p className="results-summary" role="status" aria-live="polite">
+              Showing {visibleCourses.length} of {allCourses.length} course{allCourses.length === 1 ? "" : "s"}
+            </p>
+            {hasFilters && (
+              <button type="button" className="text-link" onClick={resetFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
+
+        {coursesState.status === "loading" && <LoadingGrid count={6} label="Loading courses" />}
+
+        {coursesState.status === "error" && (
+          <ErrorState
+            title="We couldn't load the course catalogue"
+            description={coursesState.error}
+            onRetry={onRetry}
+          />
+        )}
+
+        {coursesState.status === "ready" && allCourses.length === 0 && (
+          <EmptyState
+            icon="book"
+            title="No courses have been published yet"
+            description="New courses will appear here as soon as faculty publish them."
+          />
+        )}
+
+        {coursesState.status === "ready" && allCourses.length > 0 && visibleCourses.length === 0 && (
+          <EmptyState
+            icon="search"
+            title="No courses match your filters"
+            description="Try a different search term or show all levels."
+          >
+            <button type="button" className="btn btn-secondary btn-sm" onClick={resetFilters}>
+              Clear filters
             </button>
-          ))}
-        </div>
+          </EmptyState>
+        )}
 
-        {/* Right side: Search & Sort */}
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          {/* Search Box */}
-          <div className="search-input-box">
-            <Icon name="search" size={16} className="search-icon-inside" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by code, title..."
-            />
+        {coursesState.status === "ready" && visibleCourses.length > 0 && (
+          <div className="grid-cards">
+            {visibleCourses.map((course) => (
+              <CourseCard
+                key={course.id ?? course.code}
+                course={course}
+                isAlreadyEnrolled={enrolledCourseIds?.has(course.id)}
+                onEnrollSuccess={onEnrolled}
+                headingLevel={3}
+              />
+            ))}
           </div>
-
-          {/* Sort Dropdown */}
-          <select
-            className="form-select"
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
-            style={{ padding: "8px 12px", fontSize: "0.8125rem", width: "auto" }}
-          >
-            <option value="default">Sort: Default</option>
-            <option value="duration-asc">Duration: Short to Long</option>
-            <option value="duration-desc">Duration: Long to Short</option>
-            <option value="title-asc">Title: A to Z</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Courses Grid */}
-      {filteredCourses.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-icon">
-            <Icon name="search" size={24} />
-          </div>
-          <h3 className="empty-state-title">No Courses Match Your Criteria</h3>
-          <p className="empty-state-desc">
-            Try adjusting your search terms or selecting "All" from the level filter above.
-          </p>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              setSelectedLevel("All");
-              setSearchQuery("");
-            }}
-          >
-            Reset Filters
-          </button>
-        </div>
-      ) : (
-        <div className="grid-cards">
-          {filteredCourses.map((course) => (
-            <CourseCard
-              key={course.id || course.code}
-              course={course}
-              onClick={onCourseClick}
-            />
-          ))}
-        </div>
-      )}
+        )}
+      </section>
     </div>
   );
 }

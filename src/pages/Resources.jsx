@@ -1,24 +1,41 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import ResourceCard from "../components/ResourceCard";
 import Icon from "../components/Icons";
+import { EmptyState, ErrorState, LoadingGrid, PageHeader, RESOURCE_TYPES } from "../components/ui";
 
-export default function Resources({ resources = [] }) {
+const TYPES = ["All", ...Object.keys(RESOURCE_TYPES)];
+
+export default function Resources({ resourcesState, onRetry }) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedType, setSelectedType] = useState("All");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get("q") || "");
 
-  const types = ["All", "NOTES", "EXERCISES", "PROJECTS", "CHEATSHEET"];
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (q !== null) {
+      setSearchQuery(q);
+      setSelectedType("All");
+    }
+  }, [searchParams]);
+
+  const updateSearch = (value) => {
+    setSearchQuery(value);
+    if (searchParams.has("q")) {
+      searchParams.delete("q");
+      setSearchParams(searchParams, { replace: true });
+    }
+  };
+
+  const resources = resourcesState.data;
 
   const filteredResources = useMemo(() => {
     let result = [...resources];
-
     if (selectedType !== "All") {
-      result = result.filter(
-        (r) => r.resourceType?.toUpperCase() === selectedType.toUpperCase()
-      );
+      result = result.filter((r) => r.resourceType?.toUpperCase() === selectedType);
     }
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
+    const q = searchQuery.toLowerCase().trim();
+    if (q) {
       result = result.filter(
         (r) =>
           r.title?.toLowerCase().includes(q) ||
@@ -26,94 +43,96 @@ export default function Resources({ resources = [] }) {
           r.resourceType?.toLowerCase().includes(q)
       );
     }
-
     return result;
   }, [resources, selectedType, searchQuery]);
 
+  const hasFilters = selectedType !== "All" || searchQuery.trim() !== "";
+  const resetFilters = () => {
+    setSelectedType("All");
+    updateSearch("");
+  };
+
   return (
-    <div>
-      <div className="section-header">
-        <div>
-          <h2 className="section-title">Academic Study Resources & Assets</h2>
-          <p className="section-subtitle">
-            Downloadable lecture slides, coding exercises, starter boilerplates, and architectural cheat sheets from Resource Service (Port 8083).
-          </p>
-        </div>
-        <span className="badge badge-cyan">
-          {filteredResources.length} of {resources.length} Assets
-        </span>
-      </div>
+    <div className="page">
+      <PageHeader
+        eyebrow="Study resources"
+        title="Notes, exercises and guides"
+        lead="Download lecture notes, practice exercises, starter projects and quick-reference sheets to support your coursework."
+      />
 
-      {/* Filter & Search Toolbar */}
-      <div className="toolbar-container">
-        {/* Category Filter Pills */}
-        <div className="filter-pills">
-          <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginRight: 4, display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <Icon name="filter" size={14} /> Category:
-          </span>
-          {types.map((type) => (
-            <button
-              key={type}
-              type="button"
-              className={`filter-pill ${selectedType === type ? "active" : ""}`}
-              onClick={() => setSelectedType(type)}
-            >
-              {type === "ALL" || type === "All"
-                ? "All Assets"
-                : type === "NOTES"
-                ? "Lecture Notes"
-                : type === "EXERCISES"
-                ? "Exercises"
-                : type === "PROJECTS"
-                ? "Projects"
-                : "Cheatsheet"}
-            </button>
-          ))}
-        </div>
+      <section className="section" aria-labelledby="resource-results-heading">
+        <h2 id="resource-results-heading" className="visually-hidden">Resource results</h2>
 
-        {/* Search */}
-        <div className="search-input-box">
-          <Icon name="search" size={16} className="search-icon-inside" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search resources by keyword..."
-          />
-        </div>
-      </div>
-
-      {/* Resources Grid */}
-      {filteredResources.length === 0 ? (
-        <div className="empty-state">
-          <div className="empty-state-icon">
-            <Icon name="download" size={24} />
+        <div className="toolbar" role="search" aria-label="Filter resources">
+          <div>
+            <span className="toolbar-label" id="type-filter-label">Type</span>
+            <div className="segmented" role="group" aria-labelledby="type-filter-label">
+              {TYPES.map((type) => (
+                <button key={type} type="button" aria-pressed={selectedType === type} onClick={() => setSelectedType(type)}>
+                  {type === "All" ? "All types" : RESOURCE_TYPES[type].label}
+                </button>
+              ))}
+            </div>
           </div>
-          <h3 className="empty-state-title">No Resources Match Your Filter</h3>
-          <p className="empty-state-desc">
-            No study materials found for this selection. Try choosing "All Assets" or searching with different keywords.
-          </p>
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              setSelectedType("All");
-              setSearchQuery("");
-            }}
-          >
-            Reset Filters
-          </button>
+          <div className="search-field">
+            <label htmlFor="resource-search" className="toolbar-label">Search</label>
+            <div style={{ position: "relative" }}>
+              <Icon name="search" size={16} />
+              <input
+                id="resource-search"
+                type="search"
+                className="form-input"
+                value={searchQuery}
+                onChange={(e) => updateSearch(e.target.value)}
+                placeholder="Title or keyword"
+              />
+            </div>
+          </div>
         </div>
-      ) : (
-        <div className="grid-cards">
-          {filteredResources.map((resource) => (
-            <ResourceCard
-              key={resource.id || resource.title}
-              resource={resource}
-            />
-          ))}
-        </div>
-      )}
+
+        {resourcesState.status === "ready" && (
+          <div className="row-between">
+            <p className="results-summary" role="status" aria-live="polite">
+              Showing {filteredResources.length} of {resources.length} resource{resources.length === 1 ? "" : "s"}
+            </p>
+            {hasFilters && (
+              <button type="button" className="text-link" onClick={resetFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
+
+        {resourcesState.status === "loading" && <LoadingGrid count={6} label="Loading resources" />}
+
+        {resourcesState.status === "error" && (
+          <ErrorState title="We couldn't load study resources" description={resourcesState.error} onRetry={onRetry} />
+        )}
+
+        {resourcesState.status === "ready" && resources.length === 0 && (
+          <EmptyState
+            icon="file-text"
+            title="No resources have been shared yet"
+            description="Study materials will appear here as soon as faculty upload them."
+          />
+        )}
+
+        {resourcesState.status === "ready" && resources.length > 0 && filteredResources.length === 0 && (
+          <EmptyState icon="search" title="No resources match your filters" description="Try another type or a different keyword.">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={resetFilters}>
+              Clear filters
+            </button>
+          </EmptyState>
+        )}
+
+        {resourcesState.status === "ready" && filteredResources.length > 0 && (
+          <div className="grid-cards">
+            {filteredResources.map((resource) => (
+              <ResourceCard key={resource.id ?? resource.title} resource={resource} />
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

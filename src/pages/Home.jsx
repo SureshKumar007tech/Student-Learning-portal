@@ -1,266 +1,216 @@
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/AuthContext";
 import CourseCard from "../components/CourseCard";
 import ResourceCard from "../components/ResourceCard";
 import Icon from "../components/Icons";
+import { EmptyState, ErrorState, LoadingGrid, SectionHeader } from "../components/ui";
 
-export default function Home({ courses = [], resources = [], onCourseClick }) {
+const LEVELS = [
+  { name: "Beginner", desc: "Start with the fundamentals — no prior experience needed." },
+  { name: "Intermediate", desc: "Build on the basics with deeper, project-based work." },
+  { name: "Advanced", desc: "Specialised topics for confident, experienced learners." }
+];
+
+export default function Home({
+  coursesState,
+  resourcesState,
+  enrolledCourseIds,
+  onEnrolled,
+  onRetry,
+  onRetryResources,
+  onSelectLevel
+}) {
   const { user, isAuthenticated, openAuthModal } = useAuth();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    // Preserving syllabus requirement: useEffect logging loaded state
-    console.log("Home page loaded from Microservices Gateway (Port 8080)");
-  }, []);
+  const courses = coursesState.data;
+  const resources = resourcesState.data;
 
-  const categories = [
-    { name: "Frontend Engineering", count: "12 Courses", icon: "code", color: "var(--accent-primary)" },
-    { name: "Microservices & Distributed Systems", count: "8 Courses", icon: "server", color: "var(--accent-cyan)" },
-    { name: "UI/UX & Design Systems", count: "6 Courses", icon: "layers", color: "var(--status-warning)" },
-    { name: "Cloud Architecture & DevOps", count: "9 Courses", icon: "award", color: "var(--status-success)" }
+  // Real counts per level, computed from the live catalogue
+  const levelCounts = useMemo(() => {
+    const counts = {};
+    courses.forEach((c) => {
+      const key = (c.level || "").toLowerCase();
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    return counts;
+  }, [courses]);
+
+  const browseLevel = (level) => {
+    onSelectLevel(level);
+    navigate("/courses");
+  };
+
+  const countText = (state, n, singular, plural) =>
+    state.status === "ready" ? `${n} ${n === 1 ? singular : plural}` : null;
+
+  const quickLinks = [
+    { to: "/courses", icon: "book", title: "Courses", desc: countText(coursesState, courses.length, "course available", "courses available") || "Browse the catalogue" },
+    { to: "/resources", icon: "file-text", title: "Study resources", desc: countText(resourcesState, resources.length, "resource to download", "resources to download") || "Notes, exercises and guides" },
+    { to: "/events", icon: "calendar", title: "Events & workshops", desc: "See what's on and reserve a seat" },
+    { to: "/contact", icon: "help-circle", title: "Help & support", desc: "Ask the student support team" }
   ];
 
   return (
-    <div>
-      {/* Hero Section */}
-      <section className="hero-banner">
-        <div className="hero-content">
-          <div className="hero-badge-tag">
-            <Icon name="sparkles" size={14} />
-            <span>Next-Gen Enterprise Learning Management</span>
+    <div className="page">
+      {/* Hero */}
+      <section className="hero" aria-labelledby="home-title">
+        <div>
+          <div className="eyebrow">
+            <Icon name="graduation" size={14} />
+            {isAuthenticated ? `Welcome back, ${user.firstName || user.username}` : "Student Learning Portal"}
           </div>
-
-          <h1 className="hero-title">
-            Master Modern Software Architecture & Distributed Engineering
+          <h1 id="home-title" className="hero-title">
+            Everything you need for your studies, in one place.
           </h1>
-
-          <p className="hero-subtitle">
-            An enterprise university LMS powered by independent Spring Boot microservices,
-            stateless JWT security, and a responsive React 19 single-page architecture.
+          <p className="hero-lead">
+            Find and enroll in courses, keep track of your progress, download study materials, and sign up for
+            workshops and campus events.
           </p>
-
-          <div className="hero-cta-group">
+          <div className="hero-actions">
             <Link to="/courses" className="btn btn-primary btn-lg">
-              <Icon name="book" size={18} />
-              Explore Course Catalogue
+              Browse courses
+              <Icon name="arrow-right" size={16} />
             </Link>
-
             {isAuthenticated ? (
-              <Link to="/dashboard" className="btn btn-secondary btn-lg" style={{ color: "var(--dark-navy)" }}>
-                <Icon name="dashboard" size={18} />
-                Go to Dashboard
+              <Link to="/dashboard" className="btn btn-secondary btn-lg">
+                Go to my dashboard
               </Link>
             ) : (
-              <button
-                type="button"
-                className="btn btn-secondary btn-lg"
-                style={{ color: "var(--dark-navy)" }}
-                onClick={() => openAuthModal("register")}
-              >
-                <Icon name="user" size={18} />
-                Create Student Account
+              <button type="button" className="btn btn-secondary btn-lg" onClick={() => openAuthModal("register")}>
+                Create a student account
               </button>
             )}
           </div>
         </div>
+
+        <nav aria-label="Quick links" className="quick-links">
+          {quickLinks.map((link) => (
+            <Link key={link.to} to={link.to} className="quick-link">
+              <span className="feature-icon">
+                <Icon name={link.icon} size={18} />
+              </span>
+              <span>
+                <span className="quick-link-title" style={{ display: "block" }}>{link.title}</span>
+                <span className="quick-link-desc">{link.desc}</span>
+              </span>
+              <Icon name="chevron-right" size={16} className="chev" />
+            </Link>
+          ))}
+        </nav>
       </section>
 
-      {/* Live Statistics Ribbon */}
-      <section className="stats-ribbon">
-        <div className="stat-metric-card">
-          <div className="stat-icon-wrapper" style={{ backgroundColor: "var(--accent-primary-subtle)", color: "var(--accent-primary)" }}>
-            <Icon name="book" size={24} />
-          </div>
-          <div>
-            <div className="stat-value">{courses.length > 0 ? courses.length : "4"}</div>
-            <div className="stat-label">Active Published Courses</div>
-          </div>
-        </div>
-
-        <div className="stat-metric-card">
-          <div className="stat-icon-wrapper" style={{ backgroundColor: "var(--accent-cyan-subtle)", color: "var(--accent-cyan)" }}>
-            <Icon name="download" size={24} />
-          </div>
-          <div>
-            <div className="stat-value">{resources.length > 0 ? resources.length : "4"}</div>
-            <div className="stat-label">Curated Learning Assets</div>
-          </div>
-        </div>
-
-        <div className="stat-metric-card">
-          <div className="stat-icon-wrapper" style={{ backgroundColor: "var(--status-warning-bg)", color: "var(--status-warning)" }}>
-            <Icon name="calendar" size={24} />
-          </div>
-          <div>
-            <div className="stat-value">4</div>
-            <div className="stat-label">Scheduled Workshops</div>
-          </div>
-        </div>
-
-        <div className="stat-metric-card">
-          <div className="stat-icon-wrapper" style={{ backgroundColor: "var(--status-success-bg)", color: "var(--status-success)" }}>
-            <Icon name="server" size={24} />
-          </div>
-          <div>
-            <div className="stat-value">5</div>
-            <div className="stat-label">Microservices Running</div>
-          </div>
-        </div>
-      </section>
-
-      {/* Learning Categories */}
-      <section className="page-section">
-        <div className="section-header">
-          <div>
-            <h2 className="section-title">Specialized Learning Tracks</h2>
-            <p className="section-subtitle">
-              Comprehensive curriculums structured from foundational web standards to cloud-native distributed microservices.
-            </p>
-          </div>
-          <Link to="/courses" className="btn btn-ghost btn-sm" style={{ color: "var(--accent-primary)" }}>
-            View all tracks <Icon name="arrow-right" size={14} />
-          </Link>
-        </div>
-
-        <div className="grid-cols-4">
-          {categories.map((cat, idx) => (
-            <div
-              key={idx}
-              className="card"
-              style={{ cursor: "pointer" }}
-              onClick={() => navigate("/courses")}
-            >
-              <div
-                style={{
-                  width: 42,
-                  height: 42,
-                  borderRadius: "var(--radius-md)",
-                  backgroundColor: "var(--bg-surface-subtle)",
-                  color: cat.color,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  marginBottom: 16
-                }}
+      {/* Browse by level */}
+      <section className="section" aria-labelledby="levels-heading">
+        <SectionHeader
+          id="levels-heading"
+          title="Browse by level"
+          lead="Pick a starting point that matches your experience."
+        />
+        <div className="grid-3">
+          {LEVELS.map((lvl) => {
+            const n = levelCounts[lvl.name.toLowerCase()] || 0;
+            return (
+              <button
+                key={lvl.name}
+                type="button"
+                className="card card-interactive level-card"
+                onClick={() => browseLevel(lvl.name)}
               >
-                <Icon name={cat.icon} size={22} />
-              </div>
-              <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: "0 0 6px" }}>{cat.name}</h3>
-              <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: 0 }}>{cat.count}</p>
-            </div>
-          ))}
+                <span className="row-between" style={{ marginBottom: 8, width: "100%" }}>
+                  <span className="card-title" style={{ margin: 0 }}>{lvl.name}</span>
+                  {coursesState.status === "ready" && (
+                    <span className="badge badge-neutral">
+                      {n} course{n === 1 ? "" : "s"}
+                    </span>
+                  )}
+                </span>
+                <span className="small" style={{ color: "var(--text-secondary)" }}>{lvl.desc}</span>
+                <span className="text-link" style={{ marginTop: 16 }}>
+                  View {lvl.name.toLowerCase()} courses <Icon name="arrow-right" size={14} />
+                </span>
+              </button>
+            );
+          })}
         </div>
       </section>
 
-      {/* Featured Courses Grid */}
-      <section className="page-section">
-        <div className="section-header">
-          <div>
-            <h2 className="section-title">Featured University Courses</h2>
-            <p className="section-subtitle">
-              Loaded dynamically from Course Service (Port 8082) via API Gateway reverse proxy.
-            </p>
+      {/* Featured courses */}
+      <section className="section" aria-labelledby="featured-heading">
+        <SectionHeader
+          id="featured-heading"
+          title="Featured courses"
+          lead="A few courses from the current catalogue."
+          action={
+            <Link to="/courses" className="btn btn-secondary btn-sm">
+              See all courses
+            </Link>
+          }
+        />
+        {coursesState.status === "loading" && <LoadingGrid count={3} label="Loading courses" />}
+        {coursesState.status === "error" && (
+          <ErrorState title="Courses are unavailable right now" description={coursesState.error} onRetry={onRetry} compact />
+        )}
+        {coursesState.status === "ready" && courses.length === 0 && (
+          <EmptyState icon="book" title="No courses yet" description="Courses will appear here once they're published." compact />
+        )}
+        {coursesState.status === "ready" && courses.length > 0 && (
+          <div className="grid-cards">
+            {courses.slice(0, 3).map((course) => (
+              <CourseCard
+                key={course.id ?? course.code}
+                course={course}
+                isAlreadyEnrolled={enrolledCourseIds?.has(course.id)}
+                onEnrollSuccess={onEnrolled}
+              />
+            ))}
           </div>
-          <Link to="/courses" className="btn btn-secondary btn-sm">
-            View All Courses ({courses.length})
+        )}
+      </section>
+
+      {/* Resources */}
+      <section className="section" aria-labelledby="resources-heading">
+        <SectionHeader
+          id="resources-heading"
+          title="Study resources"
+          lead="Lecture notes, practice exercises, starter projects and quick-reference guides."
+          action={
+            <Link to="/resources" className="btn btn-secondary btn-sm">
+              See all resources
+            </Link>
+          }
+        />
+        {resourcesState.status === "loading" && <LoadingGrid count={3} label="Loading resources" />}
+        {resourcesState.status === "error" && (
+          <ErrorState title="Resources are unavailable right now" description={resourcesState.error} onRetry={onRetryResources} compact />
+        )}
+        {resourcesState.status === "ready" && resources.length === 0 && (
+          <EmptyState icon="file-text" title="No resources yet" description="Study materials will appear here once they're uploaded." compact />
+        )}
+        {resourcesState.status === "ready" && resources.length > 0 && (
+          <div className="grid-cards">
+            {resources.slice(0, 3).map((resource) => (
+              <ResourceCard key={resource.id ?? resource.title} resource={resource} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Events + support CTA */}
+      <section className="cta-band" aria-labelledby="cta-heading">
+        <div>
+          <h2 id="cta-heading" className="section-title">Workshops, showcases and campus events</h2>
+          <p className="section-lead">Reserve a seat at upcoming sessions, or get in touch if you need a hand.</p>
+        </div>
+        <div className="row">
+          <Link to="/events" className="btn btn-primary">
+            <Icon name="calendar" size={16} />
+            See upcoming events
           </Link>
-        </div>
-
-        <div className="grid-cards">
-          {courses.slice(0, 3).map((course) => (
-            <CourseCard
-              key={course.id || course.code}
-              course={course}
-              onClick={onCourseClick}
-            />
-          ))}
-        </div>
-      </section>
-
-      {/* Learning Resources Spotlight */}
-      <section className="page-section">
-        <div className="section-header">
-          <div>
-            <h2 className="section-title">Study Resources & Technical References</h2>
-            <p className="section-subtitle">
-              Download lecture slide decks, exercises, and architectural guides directly from Resource Service (Port 8083).
-            </p>
-          </div>
-          <Link to="/resources" className="btn btn-secondary btn-sm">
-            All Resources ({resources.length})
+          <Link to="/contact" className="btn btn-secondary">
+            Get help
           </Link>
-        </div>
-
-        <div className="grid-cards">
-          {resources.slice(0, 3).map((resource) => (
-            <ResourceCard
-              key={resource.id || resource.title}
-              resource={resource}
-            />
-          ))}
-        </div>
-      </section>
-
-      {/* Microservices Architecture Banner */}
-      <section
-        style={{
-          backgroundColor: "var(--bg-surface)",
-          border: "1px solid var(--border-color)",
-          borderRadius: "var(--radius-xl)",
-          padding: "32px 36px",
-          marginBottom: 40,
-          boxShadow: "var(--shadow-sm)"
-        }}
-      >
-        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 32, alignItems: "center" }}>
-          <div>
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, color: "var(--accent-primary)", fontWeight: 600, fontSize: "0.8125rem", marginBottom: 12 }}>
-              <Icon name="server" size={16} />
-              <span>Independent Microservices & Database-Per-Service</span>
-            </div>
-            <h3 style={{ fontSize: "1.625rem", fontWeight: 800, margin: "0 0 12px", lineHeight: 1.25 }}>
-              Engineered with True Distributed Systems Standards
-            </h3>
-            <p style={{ fontSize: "0.9375rem", color: "var(--text-secondary)", lineHeight: 1.6, margin: "0 0 20px" }}>
-              Unlike basic monoliths, this platform separates concerns into 5 distinct Spring Boot microservices,
-              each with isolated databases (`user_db`, `course_db`, `resource_db`, `engagement_db`).
-              The API Gateway enforces stateless JWT validation and identity header enrichment.
-            </p>
-            <div style={{ display: "flex", gap: 12 }}>
-              <Link to="/about" className="btn btn-primary btn-sm">
-                Inspect Architecture & Viva Lab
-              </Link>
-              <Link to="/contact" className="btn btn-secondary btn-sm">
-                Contact Academic Support
-              </Link>
-            </div>
-          </div>
-
-          <div
-            style={{
-              backgroundColor: "var(--dark-navy)",
-              borderRadius: "var(--radius-lg)",
-              padding: "20px 24px",
-              color: "#CBD5E1",
-              fontFamily: "monospace",
-              fontSize: "0.8125rem",
-              lineHeight: 1.7,
-              border: "1px solid rgba(255,255,255,0.08)"
-            }}
-          >
-            <div style={{ color: "#38BDF8", fontWeight: 700, marginBottom: 8 }}>
-              // Microservices Port Registry
-            </div>
-            <div>[Gateway]     : 8080 (Reverse Proxy & CORS)</div>
-            <div>[User-Svc]    : 8081 (Auth & JWT Provider)</div>
-            <div>[Course-Svc]  : 8082 (Courses & Enrollments)</div>
-            <div>[Resource-Svc]: 8083 (Assets & Downloads)</div>
-            <div>[Engage-Svc]  : 8084 (Events & Support)</div>
-            <div style={{ marginTop: 10, color: "#10B981" }}>
-              ✓ All services decoupled & isolated
-            </div>
-          </div>
         </div>
       </section>
     </div>

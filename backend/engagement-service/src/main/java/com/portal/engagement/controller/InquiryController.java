@@ -4,6 +4,7 @@ import com.portal.engagement.dto.request.InquiryRequest;
 import com.portal.engagement.dto.request.UpdateInquiryStatusRequest;
 import com.portal.engagement.dto.response.ApiResponse;
 import com.portal.engagement.dto.response.InquiryResponse;
+import com.portal.engagement.exception.ForbiddenException;
 import com.portal.engagement.service.InquiryService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -30,7 +31,11 @@ public class InquiryController {
     }
 
     @GetMapping
-    public ResponseEntity<ApiResponse<List<InquiryResponse>>> getAllInquiries() {
+    public ResponseEntity<ApiResponse<List<InquiryResponse>>> getAllInquiries(
+            @RequestHeader(value = "X-User-Role", required = false) String xUserRole) {
+        if (!"ROLE_ADMIN".equals(xUserRole)) {
+            throw new ForbiddenException("Access denied: Only administrators can view student inquiries");
+        }
         List<InquiryResponse> list = inquiryService.getAllInquiries();
         return ResponseEntity.ok(ApiResponse.ok("Inquiries retrieved successfully", list));
     }
@@ -38,9 +43,12 @@ public class InquiryController {
     @PutMapping("/{id}/status")
     public ResponseEntity<ApiResponse<InquiryResponse>> updateStatus(
             @PathVariable Long id,
-            @Valid @RequestBody UpdateInquiryStatusRequest request) {
+            @Valid @RequestBody UpdateInquiryStatusRequest request,
+            @RequestHeader(value = "X-User-Role", required = false) String xUserRole) {
+        if (!"ROLE_ADMIN".equals(xUserRole)) {
+            throw new ForbiddenException("Access denied: Only administrators can update inquiry status");
+        }
         InquiryResponse response = inquiryService.updateInquiryStatus(id, request.getStatus());
         return ResponseEntity.ok(ApiResponse.ok("Inquiry status updated", response));
     }
 }
-

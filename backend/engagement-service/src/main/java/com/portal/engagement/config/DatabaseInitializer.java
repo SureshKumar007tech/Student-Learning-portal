@@ -3,6 +3,7 @@ package com.portal.engagement.config;
 import com.portal.engagement.dto.request.CreateEventRequest;
 import com.portal.engagement.repository.EventRepository;
 import com.portal.engagement.service.EventService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
@@ -11,14 +12,22 @@ public class DatabaseInitializer implements CommandLineRunner {
 
     private final EventRepository eventRepository;
     private final EventService eventService;
+    private final boolean seedEnabled;
 
-    public DatabaseInitializer(EventRepository eventRepository, EventService eventService) {
+    public DatabaseInitializer(
+            EventRepository eventRepository,
+            EventService eventService,
+            @Value("${portal.seed.enabled:false}") boolean seedEnabled) {
         this.eventRepository = eventRepository;
         this.eventService = eventService;
+        this.seedEnabled = seedEnabled;
     }
 
     @Override
     public void run(String... args) {
+        if (!seedEnabled) {
+            return;
+        }
         if (eventRepository.findAll().isEmpty()) {
             eventService.createEvent(new CreateEventRequest(
                     "Web Workshop",
@@ -58,4 +67,3 @@ public class DatabaseInitializer implements CommandLineRunner {
         }
     }
 }
-

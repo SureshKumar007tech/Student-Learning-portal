@@ -3,6 +3,7 @@ package com.portal.course.config;
 import com.portal.course.dto.request.CreateCourseRequest;
 import com.portal.course.repository.CourseRepository;
 import com.portal.course.service.CourseService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
@@ -11,14 +12,22 @@ public class DatabaseInitializer implements CommandLineRunner {
 
     private final CourseRepository courseRepository;
     private final CourseService courseService;
+    private final boolean seedEnabled;
 
-    public DatabaseInitializer(CourseRepository courseRepository, CourseService courseService) {
+    public DatabaseInitializer(
+            CourseRepository courseRepository,
+            CourseService courseService,
+            @Value("${portal.seed.enabled:false}") boolean seedEnabled) {
         this.courseRepository = courseRepository;
         this.courseService = courseService;
+        this.seedEnabled = seedEnabled;
     }
 
     @Override
     public void run(String... args) {
+        if (!seedEnabled) {
+            return;
+        }
         if (!courseRepository.existsByCode("CS-HTML")) {
             courseService.createCourse(new CreateCourseRequest(
                     "CS-HTML",
@@ -64,4 +73,3 @@ public class DatabaseInitializer implements CommandLineRunner {
         }
     }
 }
-

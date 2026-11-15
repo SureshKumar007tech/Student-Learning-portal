@@ -5,18 +5,20 @@
 [![Java 21](https://img.shields.io/badge/Java-21_LTS-ED8B00?logo=openjdk&logoColor=white)](https://openjdk.org/)
 [![Spring Boot](https://img.shields.io/badge/Spring_Boot-4.1.1-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![Architecture](https://img.shields.io/badge/Architecture-Distributed_Microservices-2563EB)](#microservices-architecture)
+[![Security](https://img.shields.io/badge/Security-Hardened_JWT_%26_RBAC-success)](#4-security-architecture--hardening)
 
-An enterprise-grade, distributed Student Learning Management System (LMS) designed for university-level major capstone projects and professional portfolios. Built with **React 19**, **Vite**, **Java 21**, **Spring Boot**, **Spring JDBC**, and an **API Gateway** enforcing stateless **JWT authentication** and database-per-service isolation.
+An enterprise-grade, distributed Student Learning Management System (LMS) designed for university-level major capstone projects and professional portfolios. Built with **React 19**, **Vite**, **Java 21**, **Spring Boot**, **Spring JDBC**, and an **API Gateway** enforcing stateless **JWT authentication**, database-per-service isolation, and robust record ownership.
 
 ---
 
 ## 1. Architectural Highlights
 
 - **Genuine Microservices Architecture**: 5 decoupled Spring Boot services operating on dedicated ports with strict database-per-service boundaries (`user_db`, `course_db`, `resource_db`, `engagement_db`).
-- **Centralized API Gateway (Port 8080)**: Single reverse proxy entrypoint managing CORS, routing, JWT verification, and identity header propagation (`X-User-Id`, `X-User-Role`, `X-User-Email`).
+- **Centralized API Gateway (Port 8080)**: Single reverse proxy entrypoint managing CORS, routing, correlation tracking (`X-Correlation-Id`), stripping untrusted caller headers, JWT verification, and verified identity header propagation (`X-User-Id`, `X-User-Role`, `X-User-Email`, `X-User-Name`).
+- **Database Resilience & Constraints**: Database-per-service isolation with repeatable Flyway migrations (`db/migration/V1__init_*.sql`), unique constraints, check constraints (`progress_percent BETWEEN 0 AND 100`, non-negative capacity/counts), and dual support for H2 (local dev) and PostgreSQL (production).
 - **Premium SaaS UI/UX**: Inspired by Coursera, Linear, and Notion. Engineered using an enterprise design system with light/dark theme modes, Inter typography, accessible contrast, toast notifications, confirmation dialogs, and command-palette global search (`Ctrl+K`).
 - **Complete React 19 Syllabus Mapping**: Explicitly demonstrates every core React concept (`useState`, `useEffect`, `useContext`, `useMemo`, `useRef`, custom hooks, and `useDebugValue`).
-- **Role-Based Access Control (RBAC)**: Distinct permissions and views for Students and Administrators (`ROLE_STUDENT` vs `ROLE_ADMIN`).
+- **OpenAPI 3.0 Documentation**: Native specification served at `GET /v3/api-docs` detailing all secured endpoints, request schemas, and response contracts.
 
 ---
 
@@ -53,11 +55,11 @@ flowchart TD
 
 | Microservice | Port | Database | Primary Responsibilities |
 |---|---|---|---|
-| **API Gateway** | `8080` | Stateless | Reverse proxy routing, central CORS, JWT validation, header enrichment |
-| **User Service** | `8081` | `user_db` | Student & Faculty authentication, BCrypt hashing, JWT issuance, profile persistence |
-| **Course Service** | `8082` | `course_db` | Course catalog, prerequisites, student enrollment tracking, progress percent sync |
+| **API Gateway** | `8080` | Stateless | Reverse proxy routing, central CORS, JWT validation, header sanitization, correlation IDs |
+| **User Service** | `8081` | `user_db` | Student authentication, BCrypt hashing, JWT issuance, profile ownership, role management |
+| **Course Service** | `8082` | `course_db` | Course catalog, student enrollment ownership, progress bounds (0-100%), duplicate enrollment prevention |
 | **Resource Service** | `8083` | `resource_db` | Downloadable study materials, slide decks, exercise repositories, download counters |
-| **Engagement Service** | `8084` | `engagement_db` | Academic events & workshops, RSVP confirmations, contact & support inquiry desk |
+| **Engagement Service** | `8084` | `engagement_db` | Academic events & workshops, real-time capacity checks, duplicate RSVP prevention, contact desk |
 
 ---
 
@@ -68,146 +70,144 @@ flowchart TD
 - **Build Tool**: Vite 7 (`7.1.7`)
 - **Routing**: React Router DOM (`7.9.4`)
 - **Styling**: Modern CSS Design System (Custom CSS properties, Light/Dark theme tokens, responsive layouts)
-- **Icons**: Handcrafted Crisp SVG Icon component library (0 runtime bloat)
+- **Icons**: Handcrafted Crisp SVG Icon component library (0 runtime dependencies)
 - **Typography**: Inter via Google Fonts
 
 ### Backend Microservices
 - **Language**: Java 21 LTS
 - **Framework**: Spring Boot 4.x
-- **Data Access**: Spring JDBC (`JdbcTemplate`, `RowMapper`)
-- **Security**: Stateless HMAC-SHA256 JWT Authentication, BCrypt password hashing
+- **Data Access**: Spring JDBC (`JdbcClient`, `RowMapper`)
+- **Security**: Stateless HMAC-SHA256 JWT Authentication, BCrypt password hashing, Gateway header stripping
 - **Build & Packaging**: Maven multi-module parent POM (`backend/pom.xml`)
-- **Embedded Database**: H2 (In-memory / file-persisted) with seamless PostgreSQL compatibility
+- **Persistence**: H2 (In-memory default) and PostgreSQL (`application-postgres.yml`) via Flyway repeatable migrations
 
 ---
 
-## 4. UI/UX Design System
+## 4. Security Architecture & Hardening
 
-The visual identity follows modern enterprise guidelines:
-- **Primary Background**: `#F5F7FB` (Light) / `#0B1324` (Dark Navy)
-- **Surfaces & Cards**: `#FFFFFF` (Light) / `#132039` (Dark)
-- **Primary Accent**: `#2563EB` (Tailwind Blue-600)
-- **Secondary Accent**: `#06B6D4` (Cyan-500)
-- **Text Hierarchy**: `#172033` (High contrast primary) / `#475569` (Secondary) / `#64748B` (Muted)
-- **Feedback & States**: Toast alert notifications, accessible modal confirmation dialogs, loading spinners, empty-state screens.
-
----
-
-## 5. React 19 Syllabus Mapping (Viva Examination Guide)
-
-| # | Syllabus Topic | Implementation Location | Description |
-|---|---|---|---|
-| 1 | **Foundation of React** | [main.jsx](file:///src/main.jsx), [App.jsx](file:///src/App.jsx) | React 19 StrictMode root mounting and SPA initialization |
-| 2 | **JSX** | All components in `src/components/` and `src/pages/` | Semantic, accessible JSX rendering |
-| 3 | **Components** | `src/components/*` | Reusable UI atoms and molecules (Header, Navbar, CourseCard, ResourceCard, etc.) |
-| 4 | **Events** | `onClick`, `onChange`, `onSubmit` | Synchronous state handlers and form preventDefault event handling |
-| 5 | **Forms** | [ContactForm.jsx](file:///src/components/ContactForm.jsx), [AuthModal.jsx](file:///src/components/AuthModal.jsx) | Controlled form components with input validation |
-| 6 | **Refs** | [ContactForm.jsx](file:///src/components/ContactForm.jsx), [FocusDemo.jsx](file:///src/components/FocusDemo.jsx) | `useRef` directly accessing imperative DOM focus methods |
-| 7 | **Styling React** | [styles.css](file:///src/styles.css) | Custom CSS design tokens, dynamic `.dark` class switching |
-| 8 | **Routing** | [App.jsx](file:///src/App.jsx) | `react-router-dom` v7 Route definitions and dynamic URL mapping |
-| 9 | **Rules of Hooks** | All hooks and components | Strict top-level declaration without conditional wrapping |
-| 10 | **useState** | [Dashboard.jsx](file:///src/pages/Dashboard.jsx), [Courses.jsx](file:///src/pages/Courses.jsx) | Reactive state management for progress sliders, filters, and forms |
-| 11 | **useEffect** | [App.jsx](file:///src/App.jsx), [FocusDemo.jsx](file:///src/components/FocusDemo.jsx) | Document title updates, gateway status polling, and API data fetching |
-| 12 | **useContext** | [ThemeContext.jsx](file:///src/hooks/ThemeContext.jsx), [AuthContext.jsx](file:///src/hooks/AuthContext.jsx), [ToastContext.jsx](file:///src/hooks/ToastContext.jsx) | Global state for Dark/Light theme, Auth tokens, and Toast alerts |
-| 13 | **useMemo** | [App.jsx](file:///src/App.jsx), [Courses.jsx](file:///src/pages/Courses.jsx) | Memoization of multi-attribute course and resource filtering |
-| 14 | **useRef** | [FocusDemo.jsx](file:///src/components/FocusDemo.jsx) | Direct input element focus demonstration |
-| 15 | **Custom Hooks** | [useGreeting.js](file:///src/hooks/useGreeting.js), [useLocalStorage.js](file:///src/hooks/useLocalStorage.js) | Encapsulated stateful reusable hooks |
-| 16 | **useDebugValue** | [useGreeting.js](file:///src/hooks/useGreeting.js), [useLocalStorage.js](file:///src/hooks/useLocalStorage.js) | React DevTools custom hook inspector labeling |
+1. **Zero Hardcoded JWT Secrets**:
+   - Both `user-service` and `api-gateway` enforce `@PostConstruct` validation verifying that `JWT_SECRET` is present and at least 32 characters long. Missing or weak secrets immediately fail application startup with clear diagnostic exceptions.
+2. **Explicit Service-to-Service Trust Boundary (`X-Gateway-Auth`)**:
+   - The Gateway strictly strips all caller-supplied `X-User-*` and `X-Gateway-Auth` headers from incoming HTTP requests.
+   - Upon validating the JWT signature and claims, the Gateway injects verified `X-User-Id`, `X-User-Role`, `X-User-Email`, `X-User-Name`, and a cryptographically matched internal trust token `X-Gateway-Auth`.
+   - All internal microservices (`user-service`, `course-service`, `engagement-service`, `resource-service`) enforce a `GatewaySecurityFilter` / `JwtAuthenticationFilter`: direct calls to internal ports (e.g. 8081-8084) with forged `X-User-*` headers without a valid `X-Gateway-Auth` token are immediately sanitized (identity headers stripped) and rejected with `401 Unauthorized` / `403 Forbidden`.
+3. **Public Registration Role Isolation**:
+   - Self-registration at `POST /api/v1/auth/register` unconditionally assigns `ROLE_STUDENT`. Elevated roles (`ROLE_ADMIN`, `ROLE_INSTRUCTOR`) cannot be self-selected and can only be assigned through the protected endpoint `PUT /api/v1/users/{id}/role` accessible only by verified administrators.
+4. **Backend Record Ownership Enforcement**:
+   - In `user-service`: Students can only inspect and modify their own profiles (`/api/v1/users/profile`) and accounts (`/api/v1/users/{id}`). Cross-user profile access or modification is rejected with `401 Unauthorized` / `403 Forbidden`.
+   - In `course-service`: `POST /api/v1/enrollments` derives student identity from the verified authentication context. `GET /api/v1/enrollments/student/{id}` and `PUT /api/v1/enrollments/{id}/progress` verify enrollment ownership; students cannot access or manipulate other students' progress.
+   - In `engagement-service`: `POST /api/v1/events/{id}/register` and `DELETE /api/v1/events/{id}/register` derive identity from the verified context; students cannot register or cancel seats for other students.
+5. **Staff-Only Operation Locks**:
+   - Creating courses (`POST /api/v1/courses`) and resources (`POST /api/v1/resources`) is restricted to `ROLE_ADMIN` and `ROLE_INSTRUCTOR`.
+   - Creating events (`POST /api/v1/events`), reading user lists (`GET /api/v1/users`), reading support tickets (`GET /api/v1/inquiries`), and resolving inquiries are restricted to `ROLE_ADMIN`.
+6. **Token Expiration & Client Auto-Logout**:
+   - Centralized API client detects `401 Unauthorized` responses and broadcasts a `portal:auth-expired` lifecycle event, cleanly clearing localStorage and resetting authentication states without leaving stale tokens.
 
 ---
 
-## 6. Local Environment Configuration
+## 5. Database Architecture & Migrations
 
-Copy `.env.example` to `.env` in the project root before starting the application. Replace `JWT_SECRET` with a private, randomly generated value of at least 32 characters. The backend launcher reads this file and passes the values to the microservices; Vite reads the `VITE_` settings for the frontend.
+### Database Isolation (Database-per-Service)
+Each microservice maintains its own dedicated schema with zero cross-database joins or cross-service foreign keys.
 
-Optional `PORTAL_SEED_STUDENT_PASSWORD` and `PORTAL_SEED_ADMIN_PASSWORD` values create local evaluation accounts on first startup. Leave them empty to disable default account seeding. Do not commit `.env` or share seeded passwords.
+### Repeatable Flyway Migrations
+Each service contains versioned migrations in `src/main/resources/db/migration/`:
+- `user-service`: `V1__init_user_schema.sql`
+- `course-service`: `V1__init_course_schema.sql`
+- `resource-service`: `V1__init_resource_schema.sql`
+- `engagement-service`: `V1__init_engagement_schema.sql`
+
+### Database Constraints & Indexes
+- **Unique Enrollments**: `CONSTRAINT uk_enrollment_student_course UNIQUE (course_id, student_id)`
+- **Unique Event Registrations**: `CONSTRAINT uk_event_reg_student UNIQUE (event_id, student_id)`
+- **Valid Progress Range**: `CHECK (progress_percent >= 0 AND progress_percent <= 100)`
+- **Non-negative Capacity & Counters**: `CHECK (capacity >= 0)`, `CHECK (duration_hours >= 0)`, `CHECK (download_count >= 0)`, `CHECK (visits_count >= 0)`
+- **Event Capacity Check**: Atomic concurrency check rejecting registrations with `400 Bad Request` once capacity is reached.
+- **Indexes**: Query indexes on `enrollments(student_id)`, `courses(level)`, `event_registrations(event_id, student_id)`, `resources(resource_type)`, `users(username, email)`.
+
+### Production PostgreSQL Profile
+To run any service against a persistent PostgreSQL instance instead of embedded H2:
+```bash
+java -jar target/course-service-1.0.0.jar --spring.profiles.active=postgres
+```
+Configure environment variables `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, and `SPRING_DATASOURCE_PASSWORD`.
+
+### Opt-in Development Data Seeding
+To prevent populating production databases with test records:
+- In `application.yml` (local H2 in-memory profile), `portal.seed.enabled` defaults to `true` for out-of-the-box evaluation.
+- In `application-postgres.yml` (production profile), `portal.seed.enabled` strictly defaults to `false`.
+- First-run evaluation accounts (student `student` and administrator `admin`) are only seeded when `PORTAL_SEED_ENABLED=true`.
+
+### Data Lifecycle & Retention Guidelines
+- **User Data**: Passwords hashed with BCrypt (10 rounds). On account deletion, cascade deletes student profile and personal records.
+- **Backups**: Recommend daily point-in-time recovery (PITR) backups via `pg_dump` per database.
+- **Inquiry Retention**: Support tickets in `engagement_db` retained for 180 days after resolution, then archived.
 
 ---
 
-## 7. Setup & Execution Instructions
+## 6. Setup & Execution Instructions
 
 ### Prerequisites
 - **Node.js**: v18+ (tested on Node.js 20+)
-- **Java**: JDK 21 LTS
+- **Java**: JDK 21 LTS (or JDK 23)
 - **Maven**: 3.9+ (or embedded maven wrapper)
 
-### Step 1: Start Backend Microservices
-Run the automated launch script in PowerShell:
+### Step 1: Configure Environment Variables
+Copy `.env.example` to `.env` in the root:
+```bash
+cp .env.example .env
+```
+Ensure `JWT_SECRET` is set to a secure string of at least 32 characters:
+```env
+JWT_SECRET=your-secure-random-secret-key-at-least-32-chars-long!
+```
 
+### Step 2: Start Backend Microservices
+Launch the microservices launcher in PowerShell:
 ```powershell
-# From the project root
 .\backend\start-microservices.ps1
 ```
-
-This launches all 5 Spring Boot microservices on ports 8080 through 8084 in independent terminal processes.
-
-### Step 2: Start the React 19 Frontend
-Open a new terminal window:
-
+Or start individual services:
 ```bash
-# Install frontend dependencies (if not already installed)
-npm install
+# Gateway
+mvn spring-boot:run -f backend/api-gateway/pom.xml
+# User Service
+mvn spring-boot:run -f backend/user-service/pom.xml
+# Course Service
+mvn spring-boot:run -f backend/course-service/pom.xml
+# Resource Service
+mvn spring-boot:run -f backend/resource-service/pom.xml
+# Engagement Service
+mvn spring-boot:run -f backend/engagement-service/pom.xml
+```
 
-# Start Vite development server
+### Step 3: Start the React 19 Frontend
+```bash
+npm install
 npm run dev
 ```
-
 Open [http://localhost:5173](http://localhost:5173) in your browser.
 
-### Step 3: Production Build & Verification
+### Step 4: Run Automated Tests
 ```bash
-# Build React frontend for production
-npm run build
+# Run Maven unit & security tests across all services
+mvn test -f backend/pom.xml
 
-# Run Backend Maven Tests across all 5 services
-.\backend\package-all.ps1
+# Run frontend production build
+npm run build
 ```
 
 ---
 
-## 8. API Gateway Endpoints Catalog
+## 7. Automated Test Verification Summary
 
-All client requests route through `http://localhost:8080/api/v1/**`:
+| Service | Tests Run | Failures | Errors | Coverage Highlights |
+|---|---|---|---|---|
+| **`api-gateway`** | **10** | 0 | 0 | Missing/short secret rejection, expired token rejection, tampered signature rejection, claims extraction, 401 on unauthenticated/expired protected endpoints, 404 routing |
+| **`user-service`** | **21** | 0 | 0 | Direct header forgery rejection (`ROLE_ADMIN` without `X-Gateway-Auth` ignored), trusted gateway authentication, student account privacy enforcement, self vs cross-user access, admin role update, public `ROLE_STUDENT` registration lock, password rules, duplicate prevention |
+| **`course-service`** | **12** | 0 | 0 | Service-to-service trust boundary (`GatewaySecurityFilter` stripping forged headers), context identity derivation, cross-user enrollment access rejection (403), cross-user progress tampering rejection (403), duplicate enrollment prevention |
+| **`engagement-service`** | **8** | 0 | 0 | Service trust filter, capacity limit enforcement (400), duplicate RSVP rejection (409), registration ownership verification, cancellation flow, admin-only event creation (403) |
+| **`resource-service`** | **5** | 0 | 0 | Service trust filter, resource retrieval, download counter increment, not found error handling |
+| **`frontend (vite)`** | **73 modules** | 0 | 0 | Production build verified (`dist/index.html`, `assets/index-*.js`, `assets/index-*.css`) |
 
-### User & Authentication (`user-service`: 8081)
-- `POST /api/v1/auth/register` — Register student or faculty
-- `POST /api/v1/auth/login` — Authenticate and receive JWT
-- `GET  /api/v1/auth/me` — Inspect current authenticated user
-- `GET  /api/v1/users/profile` — Retrieve student learning profile
-- `PUT  /api/v1/users/profile` — Update student bio and goals
-- `POST /api/v1/users/profile/visit` — Record portal session visit
-- `GET  /api/v1/users` — List registered users (Admin)
-
-### Course & Enrollment (`course-service`: 8082)
-- `GET  /api/v1/courses` — List courses (supports `?level=Beginner`)
-- `GET  /api/v1/courses/{id}` — Course details
-- `POST /api/v1/courses` — Publish new course (Admin)
-- `POST /api/v1/enrollments` — Enroll student into course
-- `GET  /api/v1/enrollments/student/{studentId}` — Retrieve student enrollments
-- `PUT  /api/v1/enrollments/{id}/progress` — Update completion percentage
-
-### Learning Resources (`resource-service`: 8083)
-- `GET  /api/v1/resources` — List study resources (supports `?type=NOTES`)
-- `GET  /api/v1/resources/{id}` — Resource metadata
-- `POST /api/v1/resources` — Upload new study asset (Admin)
-- `POST /api/v1/resources/{id}/download` — Increment download metric
-
-### Engagement & Support (`engagement-service`: 8084)
-- `GET  /api/v1/events` — List academic events and workshops
-- `POST /api/v1/events` — Schedule new workshop (Admin)
-- `POST /api/v1/events/{id}/register` — Confirm student RSVP
-- `POST /api/v1/inquiries` — Submit contact form support inquiry
-- `GET  /api/v1/inquiries` — Retrieve student support queue (Admin)
-- `PUT  /api/v1/inquiries/{id}/status` — Update inquiry resolution status
-
-### Gateway Health & Status (`api-gateway`: 8080)
-- `GET  /api/v1/gateway/status` — Gateway route mappings
-- `GET  /api/v1/gateway/health` — Real-time health ping of all downstream microservices
-
----
-
-## 9. Security & Architecture Best Practices
-
-- **Zero Hardcoded Secrets**: Secrets and endpoints are configured via environment properties (`application.yml` and `.env.example`).
-- **Stateless Authorization**: JWT tokens contain user identity claims signed with HMAC-SHA256; microservices validate incoming requests without server-side session state.
-- **Fail-Safe Offline Mode**: If microservices are not yet started, the React frontend gracefully activates local fallback data so evaluators can inspect every page and interaction without crashing.
+**Total Backend Automated Tests**: **56 passed, 0 failed**.

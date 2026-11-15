@@ -8,29 +8,54 @@ import com.portal.resource.repository.ResourceRepository;
 import com.portal.resource.service.impl.ResourceServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.List;
-import java.util.Optional;
+import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
 class ResourceServiceTest {
 
-    @Mock
-    private ResourceRepository resourceRepository;
-
+    private ResourceRepositoryStub resourceRepository;
     private ResourceServiceImpl resourceService;
+
+    static class ResourceRepositoryStub extends ResourceRepository {
+        Map<Long, Resource> resources = new HashMap<>();
+        long nextId = 1L;
+        boolean incrementCalled = false;
+
+        public ResourceRepositoryStub() {
+            super(null);
+        }
+
+        @Override
+        public List<Resource> findAll() {
+            return new ArrayList<>(resources.values());
+        }
+
+        @Override
+        public Optional<Resource> findById(Long id) {
+            return Optional.ofNullable(resources.get(id));
+        }
+
+        @Override
+        public Resource save(Resource r) {
+            if (r.getId() == null) {
+                r.setId(nextId++);
+            }
+            resources.put(r.getId(), r);
+            return r;
+        }
+
+        @Override
+        public void incrementDownloadCount(Long id) {
+            incrementCalled = true;
+        }
+    }
 
     @BeforeEach
     void setUp() {
+        resourceRepository = new ResourceRepositoryStub();
         resourceService = new ResourceServiceImpl(resourceRepository);
     }
 
@@ -40,8 +65,7 @@ class ResourceServiceTest {
         r1.setId(1L);
         r1.setTitle("Notes");
         r1.setResourceType("NOTES");
-
-        when(resourceRepository.findAll()).thenReturn(List.of(r1));
+        resourceRepository.resources.put(1L, r1);
 
         List<ResourceResponse> list = resourceService.getAllResources("All");
 
@@ -55,21 +79,17 @@ class ResourceServiceTest {
         r.setId(1L);
         r.setTitle("Notes");
         r.setDownloadCount(5);
-
-        when(resourceRepository.findById(1L)).thenReturn(Optional.of(r));
+        resourceRepository.resources.put(1L, r);
 
         ResourceResponse response = resourceService.downloadResource(1L);
 
         assertThat(response.getDownloadCount()).isEqualTo(6);
-        verify(resourceRepository).incrementDownloadCount(1L);
+        assertThat(resourceRepository.incrementCalled).isTrue();
     }
 
     @Test
     void getResourceById_WhenNotFound_ShouldThrowException() {
-        when(resourceRepository.findById(99L)).thenReturn(Optional.empty());
-
         assertThatThrownBy(() -> resourceService.getResourceById(99L))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 }
-

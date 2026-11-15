@@ -1,7 +1,28 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../hooks/AuthContext";
 import { useToast } from "../hooks/ToastContext";
 import Icon from "./Icons";
+import Modal from "./Modal";
+import { Alert, Spinner } from "./ui";
+
+const EMPTY_FORM = { username: "", email: "", password: "", firstName: "", lastName: "" };
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function validate(form, isLogin) {
+  const errors = {};
+  if (isLogin) {
+    if (!form.username.trim()) errors.username = "Enter your username or email.";
+    if (!form.password) errors.password = "Enter your password.";
+    return errors;
+  }
+  if (!form.firstName.trim()) errors.firstName = "Enter your first name.";
+  if (!form.lastName.trim()) errors.lastName = "Enter your last name.";
+  if (form.username.trim().length < 3) errors.username = "Username must be at least 3 characters.";
+  else if (form.username.trim().length > 50) errors.username = "Username must be 50 characters or fewer.";
+  if (!EMAIL_RE.test(form.email.trim())) errors.email = "Enter a valid email address, like name@university.edu.";
+  if (form.password.length < 6) errors.password = "Password must be at least 6 characters.";
+  return errors;
+}
 
 export default function AuthModal({ isOpen, onClose, initialMode = "login" }) {
   const { login, register } = useAuth();
@@ -11,289 +32,228 @@ export default function AuthModal({ isOpen, onClose, initialMode = "login" }) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  const [formData, setFormData] = useState({
-    username: "",
-    email: "",
-    password: "",
-    firstName: "",
-    lastName: "",
-    role: "ROLE_STUDENT"
-  });
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+  const [formData, setFormData] = useState(EMPTY_FORM);
 
   useEffect(() => {
-    setIsLogin(initialMode === "login");
-    setError("");
+    if (isOpen) {
+      setIsLogin(initialMode === "login");
+      setError("");
+      setFieldErrors({});
+      setSubmitted(false);
+      setShowPassword(false);
+    }
   }, [initialMode, isOpen]);
 
-  if (!isOpen) return null;
-
-  const handleChange = (e) => {
-    setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  const switchMode = (login) => {
+    setIsLogin(login);
     setError("");
+    setFieldErrors({});
+    setSubmitted(false);
   };
 
+  const handleChange = (e) => {
+    const next = { ...formData, [e.target.name]: e.target.value };
+    setFormData(next);
+    setError("");
+    if (submitted) setFieldErrors(validate(next, isLogin));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setSubmitted(true);
     setError("");
 
-    if (!formData.username.trim() || !formData.password.trim()) {
-      setError("Please fill in all required credentials.");
-      return;
-    }
-
-    if (!isLogin && !formData.email.trim()) {
-      setError("Email address is required for registration.");
+    const errors = validate(formData, isLogin);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      const firstField = Object.keys(errors)[0];
+      document.getElementById(`auth-${firstField}`)?.focus();
       return;
     }
 
     setLoading(true);
-
     try {
       if (isLogin) {
         const res = await login(formData.username.trim(), formData.password);
         if (res.success) {
-          toast.success(`Welcome back, ${res.data?.firstName || formData.username}!`);
+          toast.success(`Welcome back, ${res.data?.firstName || formData.username}.`, "Signed in");
+          setFormData(EMPTY_FORM);
           onClose();
         } else {
-          setError(res.error || "Authentication failed. Check your username and password.");
+          setError(res.error || "We couldn't sign you in. Check your details and try again.");
         }
       } else {
         const res = await register({
           username: formData.username.trim(),
           email: formData.email.trim(),
           password: formData.password,
-          firstName: formData.firstName.trim() || "Student",
-          lastName: formData.lastName.trim() || "User",
-          role: formData.role
+          firstName: formData.firstName.trim(),
+          lastName: formData.lastName.trim()
         });
         if (res.success) {
-          toast.success("Account created successfully! Welcome to Student Portal.");
+          toast.success("Your student account is ready.", "Account created");
+          setFormData(EMPTY_FORM);
           onClose();
         } else {
-          setError(res.error || "Registration failed. Username or email might already be taken.");
+          setError(res.error || "We couldn't create your account. The username or email may already be in use.");
         }
       }
     } catch (err) {
-      setError(err.message || "An unexpected error occurred during authentication.");
+      setError(err.message || "Something unexpected happened. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
+  const fieldProps = (name) => ({
+    id: `auth-${name}`,
+    name,
+    value: formData[name],
+    onChange: handleChange,
+    className: "form-input",
+    "aria-invalid": fieldErrors[name] ? true : undefined,
+    "aria-describedby": fieldErrors[name] ? `auth-${name}-error` : undefined,
+    disabled: loading
+  });
+
+  const FieldError = ({ name }) =>
+    fieldErrors[name] ? (
+      <span id={`auth-${name}-error`} className="form-error">
+        <Icon name="alert-circle" size={12} />
+        {fieldErrors[name]}
+      </span>
+    ) : null;
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size="sm"
+      title={isLogin ? "Welcome back" : "Create your student account"}
+      subtitle={
+        isLogin
+          ? "Sign in to see your courses, progress and event registrations."
+          : "Enroll in courses, track your progress and register for events."
+      }
+      closeDisabled={loading}
+    >
+      <div style={{ padding: "0 24px" }}>
+        <div className="tab-list" role="tablist" aria-label="Account options">
+          <button
+            type="button"
+            role="tab"
+            id="auth-tab-login"
+            className="tab"
+            aria-selected={isLogin}
+            aria-controls="auth-panel"
+            onClick={() => switchMode(true)}
+          >
+            Sign in
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="auth-tab-register"
+            className="tab"
+            aria-selected={!isLogin}
+            aria-controls="auth-panel"
+            onClick={() => switchMode(false)}
+          >
+            Create account
+          </button>
+        </div>
+      </div>
+
       <div
-        className="modal-dialog"
-        style={{ maxWidth: "460px" }}
-        onClick={(e) => e.stopPropagation()}
+        className="modal-body"
+        id="auth-panel"
+        role="tabpanel"
+        aria-labelledby={isLogin ? "auth-tab-login" : "auth-tab-register"}
+        style={{ paddingTop: 20 }}
       >
-        <div className="modal-header">
-          <div>
-            <h3 className="modal-title">
-              {isLogin ? "Sign In to Learning Portal" : "Create Student Account"}
-            </h3>
-            <p style={{ margin: "2px 0 0", fontSize: "0.8125rem", color: "var(--text-muted)" }}>
-              {isLogin
-                ? "Enter your credentials to access your dashboard"
-                : "Register for course enrollments and study materials"}
-            </p>
+        {error && (
+          <div style={{ marginBottom: 16 }}>
+            <Alert type="error">{error}</Alert>
           </div>
-          <button
-            type="button"
-            className="modal-close-btn"
-            onClick={onClose}
-            aria-label="Close"
-          >
-            <Icon name="x" size={18} />
-          </button>
-        </div>
+        )}
 
-        {/* Tab Switcher */}
-        <div style={{ display: "flex", borderBottom: "1px solid var(--border-color)", padding: "0 24px" }}>
-          <button
-            type="button"
-            onClick={() => {
-              setIsLogin(true);
-              setError("");
-            }}
-            style={{
-              flex: 1,
-              padding: "12px",
-              background: "none",
-              border: "none",
-              borderBottom: isLogin ? "2px solid var(--accent-primary)" : "2px solid transparent",
-              color: isLogin ? "var(--accent-primary)" : "var(--text-muted)",
-              fontWeight: 600,
-              fontSize: "0.875rem",
-              cursor: "pointer",
-              transition: "all 0.15s ease"
-            }}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setIsLogin(false);
-              setError("");
-            }}
-            style={{
-              flex: 1,
-              padding: "12px",
-              background: "none",
-              border: "none",
-              borderBottom: !isLogin ? "2px solid var(--accent-primary)" : "2px solid transparent",
-              color: !isLogin ? "var(--accent-primary)" : "var(--text-muted)",
-              fontWeight: 600,
-              fontSize: "0.875rem",
-              cursor: "pointer",
-              transition: "all 0.15s ease"
-            }}
-          >
-            Register
-          </button>
-        </div>
-
-        <div className="modal-body">
-          {error && (
-            <div
-              style={{
-                backgroundColor: "var(--status-error-bg)",
-                border: "1px solid rgba(239, 68, 68, 0.2)",
-                color: "var(--status-error)",
-                padding: "10px 14px",
-                borderRadius: "var(--radius-md)",
-                fontSize: "0.8125rem",
-                marginBottom: 16,
-                display: "flex",
-                alignItems: "center",
-                gap: 8
-              }}
-            >
-              <Icon name="x" size={16} />
-              <span>{error}</span>
+        <form onSubmit={handleSubmit} noValidate>
+          {!isLogin && (
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label" htmlFor="auth-firstName">First name</label>
+                <input {...fieldProps("firstName")} autoComplete="given-name" />
+                <FieldError name="firstName" />
+              </div>
+              <div className="form-group">
+                <label className="form-label" htmlFor="auth-lastName">Last name</label>
+                <input {...fieldProps("lastName")} autoComplete="family-name" />
+                <FieldError name="lastName" />
+              </div>
             </div>
           )}
 
-          <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="auth-username">
+              {isLogin ? "Username or email" : "Username"}
+            </label>
+            <input {...fieldProps("username")} autoComplete="username" autoCapitalize="none" spellCheck="false" />
+            {!isLogin && !fieldErrors.username && <span className="form-hint">3–50 characters. You'll use this to sign in.</span>}
+            <FieldError name="username" />
+          </div>
+
+          {!isLogin && (
             <div className="form-group">
-              <label className="form-label">
-                {isLogin ? "Username or Email Address" : "Choose Username *"}
-              </label>
+              <label className="form-label" htmlFor="auth-email">Email</label>
+              <input {...fieldProps("email")} type="email" autoComplete="email" placeholder="name@university.edu" />
+              <FieldError name="email" />
+            </div>
+          )}
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="auth-password">Password</label>
+            <div className="input-with-action">
               <input
-                className="form-input"
-                name="username"
-                value={formData.username}
-                onChange={handleChange}
-                placeholder={isLogin ? "e.g. student or student@portal.edu" : "e.g. jdoe"}
-                required
-                autoComplete="username"
+                {...fieldProps("password")}
+                type={showPassword ? "text" : "password"}
+                autoComplete={isLogin ? "current-password" : "new-password"}
               />
+              <button
+                type="button"
+                className="input-action"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-pressed={showPassword}
+              >
+                <Icon name={showPassword ? "eye-off" : "eye"} size={16} />
+              </button>
             </div>
+            {!isLogin && !fieldErrors.password && <span className="form-hint">At least 6 characters.</span>}
+            <FieldError name="password" />
+          </div>
 
-            {!isLogin && (
+          <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={loading} aria-busy={loading} style={{ marginTop: 4 }}>
+            {loading ? (
               <>
-                <div className="form-group">
-                  <label className="form-label">Email Address *</label>
-                  <input
-                    className="form-input"
-                    name="email"
-                    type="email"
-                    value={formData.email}
-                    onChange={handleChange}
-                    placeholder="student@university.edu"
-                    required
-                    autoComplete="email"
-                  />
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <div className="form-group">
-                    <label className="form-label">First Name *</label>
-                    <input
-                      className="form-input"
-                      name="firstName"
-                      value={formData.firstName}
-                      onChange={handleChange}
-                      placeholder="Alex"
-                      required
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Last Name *</label>
-                    <input
-                      className="form-input"
-                      name="lastName"
-                      value={formData.lastName}
-                      onChange={handleChange}
-                      placeholder="Morgan"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Platform Role</label>
-                  <select
-                    className="form-select"
-                    name="role"
-                    value={formData.role}
-                    onChange={handleChange}
-                  >
-                    <option value="ROLE_STUDENT">Student (Full Learner Access)</option>
-                    <option value="ROLE_ADMIN">Administrator (Management Console)</option>
-                  </select>
-                </div>
+                <Spinner /> {isLogin ? "Signing in…" : "Creating account…"}
               </>
+            ) : isLogin ? (
+              "Sign in"
+            ) : (
+              "Create account"
             )}
+          </button>
+        </form>
 
-            <div className="form-group">
-              <label className="form-label">Password *</label>
-              <div className="input-password-wrapper">
-                <input
-                  className="form-input"
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  value={formData.password}
-                  onChange={handleChange}
-                  placeholder={isLogin ? "Enter your password" : "Min 6 characters"}
-                  required
-                  autoComplete={isLogin ? "current-password" : "new-password"}
-                />
-                <button
-                  type="button"
-                  className="password-toggle-btn"
-                  onClick={() => setShowPassword(!showPassword)}
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                >
-                  <Icon name={showPassword ? "eye-off" : "eye"} size={16} />
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="btn btn-primary"
-              style={{ width: "100%", marginTop: 8 }}
-              disabled={loading}
-            >
-              {loading
-                ? "Authenticating with User Microservice..."
-                : isLogin
-                ? "Sign In"
-                : "Create Account"}
-            </button>
-          </form>
-        </div>
-
-        <div className="modal-footer" style={{ justifyContent: "center" }}>
-          <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
-            Protected by Stateless JWT • User Service (Port 8081)
-          </span>
-        </div>
+        <p className="small muted" style={{ textAlign: "center", marginTop: 16 }}>
+          {isLogin ? "New to the portal? " : "Already have an account? "}
+          <button type="button" className="text-link" onClick={() => switchMode(!isLogin)}>
+            {isLogin ? "Create an account" : "Sign in"}
+          </button>
+        </p>
       </div>
-    </div>
+    </Modal>
   );
 }

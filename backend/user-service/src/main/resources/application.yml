@@ -17,8 +17,16 @@ jwt:
   secret: ${JWT_SECRET}
   expiration-ms: 86400000 # 24 hours
 
+gateway:
+  internal-secret: ${GATEWAY_INTERNAL_SECRET:${jwt.secret}}
+
+portal:
+  seed:
+    enabled: ${PORTAL_SEED_ENABLED:false}
+    student-password: ${PORTAL_SEED_STUDENT_PASSWORD:}
+    admin-password: ${PORTAL_SEED_ADMIN_PASSWORD:}
+
 logging:
   level:
     com.portal.user: INFO
     org.springframework.web: INFO
-

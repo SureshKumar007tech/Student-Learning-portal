@@ -39,8 +39,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/v1/auth/**").permitAll()
                 .requestMatchers("/actuator/**").permitAll()
                 .requestMatchers("/h2-console/**").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/v1/users/**").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/users/profile/visit").permitAll()
+                .requestMatchers("/api/v1/users/**").authenticated()
                 .anyRequest().authenticated()
             )
             .headers(headers -> headers.frameOptions(frame -> frame.disable()))
@@ -49,4 +49,3 @@ public class SecurityConfig {
         return http.build();
     }
 }
-

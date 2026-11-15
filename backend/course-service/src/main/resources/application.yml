@@ -16,7 +16,16 @@ spring:
 services:
   user-service-url: http://localhost:8081
 
+gateway:
+  internal-secret: ${GATEWAY_INTERNAL_SECRET:${jwt.secret:}}
+
+jwt:
+  secret: ${JWT_SECRET:}
+
+portal:
+  seed:
+    enabled: ${PORTAL_SEED_ENABLED:false}
+
 logging:
   level:
     com.portal.course: INFO
-

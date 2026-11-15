@@ -10,12 +10,13 @@ public class EventResponse {
     private String description;
     private String organizer;
     private int capacity;
+    private int registeredCount;
     private boolean isActive;
     private LocalDateTime createdAt;
 
     public EventResponse() {}
 
-    public EventResponse(Long id, String title, String eventDate, String venue, String description, String organizer, int capacity, boolean isActive, LocalDateTime createdAt) {
+    public EventResponse(Long id, String title, String eventDate, String venue, String description, String organizer, int capacity, int registeredCount, boolean isActive, LocalDateTime createdAt) {
         this.id = id;
         this.title = title;
         this.eventDate = eventDate;
@@ -23,6 +24,7 @@ public class EventResponse {
         this.description = description;
         this.organizer = organizer;
         this.capacity = capacity;
+        this.registeredCount = registeredCount;
         this.isActive = isActive;
         this.createdAt = createdAt;
     }
@@ -48,10 +50,12 @@ public class EventResponse {
     public int getCapacity() { return capacity; }
     public void setCapacity(int capacity) { this.capacity = capacity; }
 
+    public int getRegisteredCount() { return registeredCount; }
+    public void setRegisteredCount(int registeredCount) { this.registeredCount = registeredCount; }
+
     public boolean isActive() { return isActive; }
     public void setActive(boolean active) { isActive = active; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }
-

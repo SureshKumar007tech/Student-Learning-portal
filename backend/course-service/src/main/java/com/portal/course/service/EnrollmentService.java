@@ -7,8 +7,7 @@ import com.portal.course.dto.response.EnrollmentResponse;
 import java.util.List;
 
 public interface EnrollmentService {
-    EnrollmentResponse enrollStudent(EnrollmentRequest request);
-    List<EnrollmentResponse> getStudentEnrollments(Long studentId);
-    EnrollmentResponse updateProgress(Long enrollmentId, UpdateProgressRequest request);
+    EnrollmentResponse enrollStudent(EnrollmentRequest request, String xUserId, String xUserRole);
+    List<EnrollmentResponse> getStudentEnrollments(Long studentId, String xUserId, String xUserRole);
+    EnrollmentResponse updateProgress(Long enrollmentId, UpdateProgressRequest request, String xUserId, String xUserRole);
 }
-

@@ -54,6 +54,21 @@ public class EventRegistrationRepository {
                 .list();
     }
 
+    public int countByEventId(Long eventId) {
+        Integer count = jdbcClient.sql("SELECT COUNT(*) FROM event_registrations WHERE event_id = :eventId AND status = 'CONFIRMED'")
+                .param("eventId", eventId)
+                .query(Integer.class)
+                .single();
+        return count != null ? count : 0;
+    }
+
+    public int deleteByEventIdAndStudentId(Long eventId, Long studentId) {
+        return jdbcClient.sql("DELETE FROM event_registrations WHERE event_id = :eventId AND student_id = :studentId")
+                .param("eventId", eventId)
+                .param("studentId", studentId)
+                .update();
+    }
+
     public EventRegistration save(EventRegistration reg) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         String sql = "INSERT INTO event_registrations (event_id, student_id, student_name, student_email, status, registered_at) " +
@@ -78,4 +93,3 @@ public class EventRegistrationRepository {
         return reg;
     }
 }
-

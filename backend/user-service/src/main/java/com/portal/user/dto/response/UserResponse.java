@@ -10,10 +10,15 @@ public class UserResponse {
     private String firstName;
     private String lastName;
     private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 
     public UserResponse() {}
 
     public UserResponse(Long id, String username, String email, String role, String firstName, String lastName, LocalDateTime createdAt) {
+        this(id, username, email, role, firstName, lastName, createdAt, createdAt);
+    }
+
+    public UserResponse(Long id, String username, String email, String role, String firstName, String lastName, LocalDateTime createdAt, LocalDateTime updatedAt) {
         this.id = id;
         this.username = username;
         this.email = email;
@@ -21,6 +26,7 @@ public class UserResponse {
         this.firstName = firstName;
         this.lastName = lastName;
         this.createdAt = createdAt;
+        this.updatedAt = updatedAt;
     }
 
     public Long getId() { return id; }
@@ -43,5 +49,7 @@ public class UserResponse {
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
-}
 
+    public LocalDateTime getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(LocalDateTime updatedAt) { this.updatedAt = updatedAt; }
+}

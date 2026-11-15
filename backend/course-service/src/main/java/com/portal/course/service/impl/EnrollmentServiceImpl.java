@@ -6,7 +6,9 @@ import com.portal.course.dto.response.EnrollmentResponse;
 import com.portal.course.entity.Course;
 import com.portal.course.entity.Enrollment;
 import com.portal.course.exception.DuplicateResourceException;
+import com.portal.course.exception.ForbiddenException;
 import com.portal.course.exception.ResourceNotFoundException;
+import com.portal.course.exception.UnauthorizedException;
 import com.portal.course.repository.CourseRepository;
 import com.portal.course.repository.EnrollmentRepository;
 import com.portal.course.service.EnrollmentService;
@@ -30,18 +32,33 @@ public class EnrollmentServiceImpl implements EnrollmentService {
 
     @Override
     @Transactional
-    public EnrollmentResponse enrollStudent(EnrollmentRequest request) {
+    public EnrollmentResponse enrollStudent(EnrollmentRequest request, String xUserId, String xUserRole) {
+        if (xUserId == null || xUserId.isBlank()) {
+            throw new UnauthorizedException("Authentication required to enroll in a course");
+        }
+
+        Long verifiedStudentId;
+        if ("ROLE_ADMIN".equals(xUserRole) && request.getStudentId() != null) {
+            verifiedStudentId = request.getStudentId();
+        } else {
+            try {
+                verifiedStudentId = Long.parseLong(xUserId.trim());
+            } catch (NumberFormatException e) {
+                throw new UnauthorizedException("Invalid authenticated user identity");
+            }
+        }
+
         Course course = courseRepository.findById(request.getCourseId())
                 .orElseThrow(() -> new ResourceNotFoundException("Course not found with id: " + request.getCourseId()));
 
-        enrollmentRepository.findByStudentIdAndCourseId(request.getStudentId(), request.getCourseId())
+        enrollmentRepository.findByStudentIdAndCourseId(verifiedStudentId, request.getCourseId())
                 .ifPresent(existing -> {
                     throw new DuplicateResourceException("Student is already enrolled in course: " + course.getTitle());
                 });
 
         Enrollment enrollment = new Enrollment();
         enrollment.setCourseId(course.getId());
-        enrollment.setStudentId(request.getStudentId());
+        enrollment.setStudentId(verifiedStudentId);
         enrollment.setStatus("ENROLLED");
         enrollment.setProgressPercent(0);
 
@@ -50,7 +67,23 @@ public class EnrollmentServiceImpl implements EnrollmentService {
     }
 
     @Override
-    public List<EnrollmentResponse> getStudentEnrollments(Long studentId) {
+    public List<EnrollmentResponse> getStudentEnrollments(Long studentId, String xUserId, String xUserRole) {
+        if (xUserId == null || xUserId.isBlank()) {
+            throw new UnauthorizedException("Authentication required to access student enrollments");
+        }
+
+        Long currentUserId;
+        try {
+            currentUserId = Long.parseLong(xUserId.trim());
+        } catch (NumberFormatException e) {
+            throw new UnauthorizedException("Invalid authenticated user identity");
+        }
+
+        boolean isAdmin = "ROLE_ADMIN".equals(xUserRole);
+        if (!isAdmin && !studentId.equals(currentUserId)) {
+            throw new ForbiddenException("Access denied: You can only view your own course enrollments");
+        }
+
         List<Enrollment> enrollments = enrollmentRepository.findByStudentId(studentId);
         List<EnrollmentResponse> responses = new ArrayList<>();
 
@@ -63,9 +96,25 @@ public class EnrollmentServiceImpl implements EnrollmentService {
 
     @Override
     @Transactional
-    public EnrollmentResponse updateProgress(Long enrollmentId, UpdateProgressRequest request) {
+    public EnrollmentResponse updateProgress(Long enrollmentId, UpdateProgressRequest request, String xUserId, String xUserRole) {
+        if (xUserId == null || xUserId.isBlank()) {
+            throw new UnauthorizedException("Authentication required to update course progress");
+        }
+
+        Long currentUserId;
+        try {
+            currentUserId = Long.parseLong(xUserId.trim());
+        } catch (NumberFormatException e) {
+            throw new UnauthorizedException("Invalid authenticated user identity");
+        }
+
         Enrollment enrollment = enrollmentRepository.findById(enrollmentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Enrollment not found with id: " + enrollmentId));
+
+        boolean isAdmin = "ROLE_ADMIN".equals(xUserRole);
+        if (!isAdmin && !enrollment.getStudentId().equals(currentUserId)) {
+            throw new ForbiddenException("Access denied: You cannot update progress for another student's enrollment");
+        }
 
         int newProgress = request.getProgressPercent();
         String newStatus = enrollment.getStatus();
@@ -103,4 +152,3 @@ public class EnrollmentServiceImpl implements EnrollmentService {
         );
     }
 }
-

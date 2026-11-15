@@ -3,6 +3,7 @@ package com.portal.course.controller;
 import com.portal.course.dto.request.CreateCourseRequest;
 import com.portal.course.dto.response.ApiResponse;
 import com.portal.course.dto.response.CourseResponse;
+import com.portal.course.exception.ForbiddenException;
 import com.portal.course.service.CourseService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -34,10 +35,14 @@ public class CourseController {
     }
 
     @PostMapping
-    public ResponseEntity<ApiResponse<CourseResponse>> createCourse(@Valid @RequestBody CreateCourseRequest request) {
+    public ResponseEntity<ApiResponse<CourseResponse>> createCourse(
+            @Valid @RequestBody CreateCourseRequest request,
+            @RequestHeader(value = "X-User-Role", required = false) String xUserRole) {
+        if (!"ROLE_ADMIN".equals(xUserRole) && !"ROLE_INSTRUCTOR".equals(xUserRole)) {
+            throw new ForbiddenException("Access denied: Only administrators and instructors can create courses");
+        }
         CourseResponse response = courseService.createCourse(request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok("Course created successfully", response));
     }
 }
-

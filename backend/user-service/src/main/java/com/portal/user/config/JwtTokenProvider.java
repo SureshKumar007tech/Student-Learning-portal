@@ -1,5 +1,6 @@
 package com.portal.user.config;
 
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -17,11 +18,27 @@ import java.util.regex.Pattern;
 @Component
 public class JwtTokenProvider {
 
-    @Value("${jwt.secret}")
+    @Value("${jwt.secret:}")
     private String secret;
 
     @Value("${jwt.expiration-ms:86400000}")
     private long expirationMs;
+
+    @PostConstruct
+    public void validateSecretConfiguration() {
+        if (secret == null || secret.trim().isEmpty()) {
+            throw new IllegalStateException(
+                "CRITICAL SECURITY CONFIGURATION ERROR: 'jwt.secret' (JWT_SECRET) is missing. " +
+                "Startup aborted. You must configure a secure secret through environment variables or secure configuration."
+            );
+        }
+        if (secret.trim().length() < 32) {
+            throw new IllegalStateException(
+                "CRITICAL SECURITY CONFIGURATION ERROR: 'jwt.secret' is too short (current length: " +
+                secret.trim().length() + "). HMAC-SHA256 requires a secret of at least 32 characters (256 bits)."
+            );
+        }
+    }
 
     public String generateToken(Long userId, String username, String email, String role) {
         try {
@@ -47,7 +64,7 @@ public class JwtTokenProvider {
 
     public boolean validateToken(String token) {
         try {
-            if (token == null) return false;
+            if (token == null || token.trim().isEmpty()) return false;
             String[] parts = token.split("\\.");
             if (parts.length != 3) return false;
 

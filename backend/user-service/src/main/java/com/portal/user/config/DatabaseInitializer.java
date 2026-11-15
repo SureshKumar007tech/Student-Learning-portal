@@ -12,20 +12,29 @@ public class DatabaseInitializer implements CommandLineRunner {
 
     private final UserRepository userRepository;
     private final AuthService authService;
+    private final boolean seedEnabled;
     private final String studentPassword;
     private final String adminPassword;
 
-    public DatabaseInitializer(UserRepository userRepository, AuthService authService,
+    public DatabaseInitializer(
+            UserRepository userRepository,
+            AuthService authService,
+            @Value("${portal.seed.enabled:false}") boolean seedEnabled,
             @Value("${portal.seed.student-password:}") String studentPassword,
             @Value("${portal.seed.admin-password:}") String adminPassword) {
         this.userRepository = userRepository;
         this.authService = authService;
+        this.seedEnabled = seedEnabled;
         this.studentPassword = studentPassword;
         this.adminPassword = adminPassword;
     }
 
     @Override
     public void run(String... args) {
+        if (!seedEnabled) {
+            return;
+        }
+
         if (!studentPassword.isBlank() && !userRepository.existsByUsername("student")) {
             RegisterRequest student = new RegisterRequest(
                     "student",
@@ -35,7 +44,7 @@ public class DatabaseInitializer implements CommandLineRunner {
                     "Morgan",
                     "ROLE_STUDENT"
             );
-            authService.register(student);
+            authService.registerInternal(student, "ROLE_STUDENT");
         }
 
         if (!adminPassword.isBlank() && !userRepository.existsByUsername("admin")) {
@@ -47,8 +56,7 @@ public class DatabaseInitializer implements CommandLineRunner {
                     "Admin",
                     "ROLE_ADMIN"
             );
-            authService.register(admin);
+            authService.registerInternal(admin, "ROLE_ADMIN");
         }
     }
 }
-

@@ -8,5 +8,5 @@ public interface UserService {
     UserResponse getUserById(Long id);
     UserResponse getUserByUsername(String username);
     List<UserResponse> getAllUsers();
+    UserResponse updateUserRole(Long userId, String newRole);
 }
-

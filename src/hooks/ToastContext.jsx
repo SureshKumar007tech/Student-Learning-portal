@@ -11,7 +11,7 @@ export function ToastProvider({ children }) {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  const addToast = useCallback(({ title, message, type = "info", duration = 4000 }) => {
+  const addToast = useCallback(({ title, message, type = "info", duration = type === "error" ? 7000 : 4500 }) => {
     const id = ++toastIdCounter;
     setToasts((prev) => [...prev, { id, title, message, type, duration }]);
 
@@ -30,17 +30,17 @@ export function ToastProvider({ children }) {
     return addToast(options);
   }, [addToast]);
 
-  toast.success = (message, title = "Success") => addToast({ title, message, type: "success" });
-  toast.error = (message, title = "Error") => addToast({ title, message, type: "error" });
-  toast.info = (message, title = "Information") => addToast({ title, message, type: "info" });
-  toast.warning = (message, title = "Notice") => addToast({ title, message, type: "warning" });
+  toast.success = (message, title = "Done") => addToast({ title, message, type: "success" });
+  toast.error = (message, title = "Something went wrong") => addToast({ title, message, type: "error" });
+  toast.info = (message, title = "") => addToast({ title, message, type: "info" });
+  toast.warning = (message, title = "Heads up") => addToast({ title, message, type: "warning" });
 
   return (
     <ToastContext.Provider value={{ toast, removeToast, toasts }}>
       {children}
-      <div className="toast-container" aria-live="polite" aria-atomic="true">
+      <div className="toast-container" aria-live="polite">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.type}`} role="alert">
+          <div key={t.id} className={`toast toast-${t.type}`} role={t.type === "error" ? "alert" : "status"}>
             <div className="toast-icon">
               {t.type === "success" && (
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -95,4 +95,3 @@ export function useToast() {
   }
   return context.toast;
 }
-

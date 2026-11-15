@@ -40,6 +40,16 @@ export function AuthProvider({ children }) {
     }
   }, [isAuthenticated, refreshProfile]);
 
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      setUser(null);
+      setToken(null);
+      setProfile(null);
+    };
+    window.addEventListener("portal:auth-expired", handleAuthExpired);
+    return () => window.removeEventListener("portal:auth-expired", handleAuthExpired);
+  }, []);
+
   const login = async (usernameOrEmail, password) => {
     const result = await loginUser(usernameOrEmail, password);
     if (result.success && result.data) {

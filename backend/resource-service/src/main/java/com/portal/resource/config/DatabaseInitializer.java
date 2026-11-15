@@ -3,6 +3,7 @@ package com.portal.resource.config;
 import com.portal.resource.dto.request.CreateResourceRequest;
 import com.portal.resource.repository.ResourceRepository;
 import com.portal.resource.service.ResourceService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
@@ -11,14 +12,22 @@ public class DatabaseInitializer implements CommandLineRunner {
 
     private final ResourceRepository resourceRepository;
     private final ResourceService resourceService;
+    private final boolean seedEnabled;
 
-    public DatabaseInitializer(ResourceRepository resourceRepository, ResourceService resourceService) {
+    public DatabaseInitializer(
+            ResourceRepository resourceRepository,
+            ResourceService resourceService,
+            @Value("${portal.seed.enabled:false}") boolean seedEnabled) {
         this.resourceRepository = resourceRepository;
         this.resourceService = resourceService;
+        this.seedEnabled = seedEnabled;
     }
 
     @Override
     public void run(String... args) {
+        if (!seedEnabled) {
+            return;
+        }
         if (resourceRepository.findAll().isEmpty()) {
             resourceService.createResource(new CreateResourceRequest(
                     "Notes",
@@ -54,4 +63,3 @@ public class DatabaseInitializer implements CommandLineRunner {
         }
     }
 }
-

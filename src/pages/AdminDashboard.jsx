@@ -1,734 +1,628 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "../hooks/AuthContext";
 import { useToast } from "../hooks/ToastContext";
-import { getAllUsers } from "../services/authService";
+import { getAllUsers, checkGatewayHealth } from "../services/authService";
 import { fetchCourses, createCourse } from "../services/courseService";
 import { fetchResources, createResource } from "../services/resourceService";
 import { fetchEvents, createEvent } from "../services/eventService";
 import { fetchAllInquiries, updateInquiryStatus } from "../services/contactService";
+import { unwrapList } from "../services/apiClient";
 import Icon from "../components/Icons";
+import {
+  Alert,
+  EmptyState,
+  ErrorState,
+  LoadingRows,
+  PageHeader,
+  Spinner,
+  formatLevel,
+  levelBadgeClass,
+  resourceTypeInfo,
+  RESOURCE_TYPES
+} from "../components/ui";
 
-export default function AdminDashboard() {
-  const { user, isAdmin, openAuthModal } = useAuth();
+const TABS = [
+  { id: "overview", label: "Overview" },
+  { id: "courses", label: "Courses" },
+  { id: "resources", label: "Resources" },
+  { id: "events", label: "Events" },
+  { id: "inquiries", label: "Inquiries" },
+  { id: "users", label: "Users" }
+];
+
+const SERVICES = [
+  { key: "gateway", label: "API gateway" },
+  { key: "user-service", label: "Accounts & sign-in" },
+  { key: "course-service", label: "Courses & enrollments" },
+  { key: "resource-service", label: "Study resources" },
+  { key: "engagement-service", label: "Events & support inquiries" }
+];
+
+const EMPTY_COURSE = { code: "", title: "", description: "", level: "Beginner", durationHours: 10 };
+const EMPTY_RESOURCE = { title: "", description: "", resourceType: "NOTES", fileUrl: "" };
+const EMPTY_EVENT = { title: "", eventDate: "", venue: "", description: "", organizer: "", capacity: 100 };
+
+const remote = { status: "loading", data: [], error: null };
+
+function formatDateInput(value) {
+  if (!value) return "";
+  const d = new Date(`${value}T00:00:00`);
+  return Number.isNaN(d.getTime())
+    ? value
+    : d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
+
+function inquiryBadge(status) {
+  if (status === "RESOLVED") return "badge-success";
+  if (status === "IN_PROGRESS") return "badge-primary";
+  return "badge-warning";
+}
+
+function inquiryLabel(status) {
+  if (status === "IN_PROGRESS") return "In progress";
+  if (status === "RESOLVED") return "Resolved";
+  return "New";
+}
+
+export default function AdminDashboard({ onCatalogChanged }) {
+  const { isAdmin, isAuthenticated, openAuthModal } = useAuth();
   const toast = useToast();
+  const tabRefs = useRef({});
 
-  const [activeTab, setActiveTab] = useState("overview"); // 'overview' | 'courses' | 'resources' | 'events' | 'inquiries' | 'users'
-  const [users, setUsers] = useState([]);
-  const [courses, setCourses] = useState([]);
-  const [resources, setResources] = useState([]);
-  const [events, setEvents] = useState([]);
-  const [inquiries, setInquiries] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [users, setUsers] = useState(remote);
+  const [courses, setCourses] = useState(remote);
+  const [resources, setResources] = useState(remote);
+  const [events, setEvents] = useState(remote);
+  const [inquiries, setInquiries] = useState(remote);
+  const [health, setHealth] = useState({ status: "idle", data: null, checkedAt: null, error: null });
 
-  // Forms state
-  const [newCourse, setNewCourse] = useState({
-    code: "",
-    title: "",
-    description: "",
-    level: "Beginner",
-    durationHours: 10
-  });
+  const [newCourse, setNewCourse] = useState(EMPTY_COURSE);
+  const [newResource, setNewResource] = useState(EMPTY_RESOURCE);
+  const [newEvent, setNewEvent] = useState(EMPTY_EVENT);
+  const [formError, setFormError] = useState({});
+  const [submitting, setSubmitting] = useState(null);
+  const [updatingInquiry, setUpdatingInquiry] = useState(null);
 
-  const [newResource, setNewResource] = useState({
-    title: "",
-    description: "",
-    resourceType: "NOTES",
-    fileUrl: "/files/new-material.pdf"
-  });
-
-  const [newEvent, setNewEvent] = useState({
-    title: "",
-    eventDate: "",
-    venue: "",
-    description: "",
-    organizer: "Computer Science Dept",
-    capacity: 100
-  });
-
-  const [submittingAction, setSubmittingAction] = useState(false);
-
-  useEffect(() => {
-    async function loadAdminData() {
-      setLoading(true);
-      try {
-        const [usersRes, coursesData, resourcesData, eventsData, inquiriesRes] =
-          await Promise.all([
-            getAllUsers(),
-            fetchCourses(),
-            fetchResources(),
-            fetchEvents(),
-            fetchAllInquiries()
-          ]);
-
-        if (usersRes?.success && Array.isArray(usersRes.data)) {
-          setUsers(usersRes.data);
-        } else {
-          setUsers([
-            { id: 1, username: "student", email: "student@portal.edu", firstName: "Alex", lastName: "Morgan", role: "ROLE_STUDENT" },
-            { id: 2, username: "admin", email: "admin@portal.edu", firstName: "System", lastName: "Admin", role: "ROLE_ADMIN" }
-          ]);
-        }
-
-        setCourses(coursesData || []);
-        setResources(resourcesData || []);
-        setEvents(eventsData || []);
-
-        if (inquiriesRes?.success && Array.isArray(inquiriesRes.data)) {
-          setInquiries(inquiriesRes.data);
-        } else {
-          setInquiries([
-            { id: 1, name: "David Miller", email: "david@university.edu", message: "Question about Spring Boot prerequisites.", status: "NEW", createdAt: "2026-11-12" },
-            { id: 2, name: "Chloe Bennett", email: "chloe@university.edu", message: "Access request for React starter projects.", status: "RESOLVED", createdAt: "2026-11-10" }
-          ]);
-        }
-      } catch {
-        // Fallback
-      } finally {
-        setLoading(false);
-      }
+  const load = async (setter, loader) => {
+    setter((prev) => ({ ...prev, status: "loading", error: null }));
+    try {
+      setter({ status: "ready", data: await loader(), error: null });
+    } catch (err) {
+      setter({ status: "error", data: [], error: err.message });
     }
+  };
 
-    loadAdminData();
+  const loadAll = useCallback(() => {
+    load(setUsers, async () => unwrapList(await getAllUsers()));
+    load(setCourses, fetchCourses);
+    load(setResources, fetchResources);
+    load(setEvents, fetchEvents);
+    load(setInquiries, async () => unwrapList(await fetchAllInquiries()));
   }, []);
 
-  const handleCreateCourse = async (e) => {
-    e.preventDefault();
-    setSubmittingAction(true);
-    try {
-      const res = await createCourse({
-        ...newCourse,
-        durationHours: Number(newCourse.durationHours) || 10
-      });
-
-      if (res.success && res.data) {
-        setCourses((prev) => [...prev, res.data]);
-        toast.success(`Course "${newCourse.title}" created in Course Service (8082)!`);
-        setNewCourse({ code: "", title: "", description: "", level: "Beginner", durationHours: 10 });
-      } else {
-        const dummyCourse = { ...newCourse, id: Date.now() };
-        setCourses((prev) => [...prev, dummyCourse]);
-        toast.info(`Course "${newCourse.title}" created in catalog (Demo mode).`);
-        setNewCourse({ code: "", title: "", description: "", level: "Beginner", durationHours: 10 });
-      }
-    } catch {
-      toast.info("Course created.");
-    } finally {
-      setSubmittingAction(false);
+  const runHealthCheck = useCallback(async () => {
+    setHealth((prev) => ({ ...prev, status: "loading", error: null }));
+    const res = await checkGatewayHealth();
+    if (res.success && res.data) {
+      setHealth({ status: "ready", data: res.data, checkedAt: new Date(), error: null });
+    } else {
+      setHealth({ status: "error", data: null, checkedAt: new Date(), error: res.error });
     }
-  };
+  }, []);
 
-  const handleCreateResource = async (e) => {
-    e.preventDefault();
-    setSubmittingAction(true);
-    try {
-      const res = await createResource(newResource);
-      if (res.success && res.data) {
-        setResources((prev) => [...prev, res.data]);
-        toast.success(`Resource "${newResource.title}" added to Resource Service (8083)!`);
-        setNewResource({ title: "", description: "", resourceType: "NOTES", fileUrl: "/files/new-material.pdf" });
-      } else {
-        const dummyResource = { ...newResource, id: Date.now(), downloadCount: 0 };
-        setResources((prev) => [...prev, dummyResource]);
-        toast.info(`Resource "${newResource.title}" added to catalog.`);
-        setNewResource({ title: "", description: "", resourceType: "NOTES", fileUrl: "/files/new-material.pdf" });
-      }
-    } catch {
-      toast.info("Resource created.");
-    } finally {
-      setSubmittingAction(false);
-    }
-  };
-
-  const handleCreateEvent = async (e) => {
-    e.preventDefault();
-    setSubmittingAction(true);
-    try {
-      const res = await createEvent({
-        ...newEvent,
-        capacity: Number(newEvent.capacity) || 100
-      });
-      if (res.success && res.data) {
-        setEvents((prev) => [...prev, res.data]);
-        toast.success(`Event "${newEvent.title}" published in Engagement Service (8084)!`);
-        setNewEvent({ title: "", eventDate: "", venue: "", description: "", organizer: "Computer Science Dept", capacity: 100 });
-      } else {
-        const dummyEvent = { ...newEvent, id: Date.now() };
-        setEvents((prev) => [...prev, dummyEvent]);
-        toast.info(`Event "${newEvent.title}" published in calendar.`);
-        setNewEvent({ title: "", eventDate: "", venue: "", description: "", organizer: "Computer Science Dept", capacity: 100 });
-      }
-    } catch {
-      toast.info("Event created.");
-    } finally {
-      setSubmittingAction(false);
-    }
-  };
-
-  const handleUpdateInquiryStatus = async (inquiryId, newStatus) => {
-    try {
-      const res = await updateInquiryStatus(inquiryId, newStatus);
-      setInquiries((prev) =>
-        prev.map((i) => (i.id === inquiryId ? { ...i, status: newStatus } : i))
-      );
-      toast.success(`Inquiry #${inquiryId} updated to ${newStatus} in Engagement Service!`);
-    } catch {
-      setInquiries((prev) =>
-        prev.map((i) => (i.id === inquiryId ? { ...i, status: newStatus } : i))
-      );
-      toast.info(`Inquiry updated to ${newStatus}.`);
-    }
-  };
+  useEffect(() => {
+    if (!isAdmin) return;
+    loadAll();
+    runHealthCheck();
+  }, [isAdmin, loadAll, runHealthCheck]);
 
   if (!isAdmin) {
     return (
-      <div className="card" style={{ maxWidth: 640, margin: "40px auto", textAlign: "center", padding: 40 }}>
-        <div style={{ width: 56, height: 56, borderRadius: "50%", backgroundColor: "var(--status-warning-bg)", color: "var(--status-warning)", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-          <Icon name="shield" size={28} />
-        </div>
-        <h2 style={{ fontSize: "1.375rem", fontWeight: 700, margin: "0 0 10px" }}>
-          Admin Role Required
-        </h2>
-        <p style={{ color: "var(--text-secondary)", fontSize: "0.9375rem", lineHeight: 1.6, margin: "0 0 24px" }}>
-          The Admin Console gives faculty and administrators control over course catalogues,
-          learning assets, events, student directories, and incoming support inquiries.
-        </p>
-
-<button
-          type="button"
-          className="btn btn-primary"
-          onClick={() => openAuthModal("login")}
+      <div className="page">
+        <PageHeader eyebrow="Admin console" title="Staff access only" />
+        <EmptyState
+          icon="shield"
+          title={isAuthenticated ? "Your account doesn't have admin access" : "Sign in with an administrator account"}
+          description={
+            isAuthenticated
+              ? "The admin console is for faculty and staff who manage courses, resources, events and support requests. Contact support if you think you should have access."
+              : "Faculty and staff can sign in to manage courses, resources, events and student inquiries."
+          }
         >
-          Sign In as Administrator
-        </button>
+          {!isAuthenticated && (
+            <button type="button" className="btn btn-primary" onClick={() => openAuthModal("login")}>
+              Sign in
+            </button>
+          )}
+        </EmptyState>
       </div>
     );
   }
 
+  /* ---------- create handlers: only update lists when the API confirms ---------- */
+  const submit = async (key, request, onSuccess) => {
+    setSubmitting(key);
+    setFormError((prev) => ({ ...prev, [key]: "" }));
+    try {
+      const res = await request();
+      if (res.success && res.data) {
+        onSuccess(res.data);
+      } else {
+        setFormError((prev) => ({ ...prev, [key]: res.error || "This couldn't be saved. Please try again." }));
+      }
+    } catch {
+      setFormError((prev) => ({ ...prev, [key]: "This couldn't be saved. Please try again." }));
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
+  const handleCreateCourse = (e) => {
+    e.preventDefault();
+    submit(
+      "course",
+      () => createCourse({ ...newCourse, code: newCourse.code.trim(), title: newCourse.title.trim(), description: newCourse.description.trim(), durationHours: Number(newCourse.durationHours) || 10 }),
+      (created) => {
+        setCourses((prev) => ({ ...prev, data: [...prev.data, created] }));
+        toast.success(`${created.title} is now in the catalogue.`, "Course published");
+        setNewCourse(EMPTY_COURSE);
+        onCatalogChanged?.();
+      }
+    );
+  };
+
+  const handleCreateResource = (e) => {
+    e.preventDefault();
+    submit(
+      "resource",
+      () => createResource({ ...newResource, title: newResource.title.trim(), description: newResource.description.trim(), fileUrl: newResource.fileUrl.trim() || undefined }),
+      (created) => {
+        setResources((prev) => ({ ...prev, data: [...prev.data, created] }));
+        toast.success(`${created.title} is now available to students.`, "Resource added");
+        setNewResource(EMPTY_RESOURCE);
+        onCatalogChanged?.();
+      }
+    );
+  };
+
+  const handleCreateEvent = (e) => {
+    e.preventDefault();
+    submit(
+      "event",
+      () =>
+        createEvent({
+          ...newEvent,
+          title: newEvent.title.trim(),
+          venue: newEvent.venue.trim(),
+          organizer: newEvent.organizer.trim() || undefined,
+          eventDate: formatDateInput(newEvent.eventDate),
+          capacity: Number(newEvent.capacity) || 100
+        }),
+      (created) => {
+        setEvents((prev) => ({ ...prev, data: [...prev.data, created] }));
+        toast.success(`${created.title} has been scheduled.`, "Event published");
+        setNewEvent(EMPTY_EVENT);
+      }
+    );
+  };
+
+  const handleUpdateInquiryStatus = async (inquiry, newStatus) => {
+    setUpdatingInquiry(inquiry.id);
+    try {
+      const res = await updateInquiryStatus(inquiry.id, newStatus);
+      if (res.success) {
+        setInquiries((prev) => ({
+          ...prev,
+          data: prev.data.map((i) => (i.id === inquiry.id ? { ...i, ...(res.data || {}), status: res.data?.status || newStatus } : i))
+        }));
+        toast.success(`Inquiry from ${inquiry.name} marked as ${inquiryLabel(newStatus).toLowerCase()}.`, "Inquiry updated");
+      } else {
+        toast.error(res.error || "The inquiry status couldn't be updated.");
+      }
+    } catch {
+      toast.error("The inquiry status couldn't be updated.");
+    } finally {
+      setUpdatingInquiry(null);
+    }
+  };
+
+  const countFor = (state) => (state.status === "ready" ? state.data.length : null);
+  const newInquiries = inquiries.data.filter((i) => (i.status || "NEW") === "NEW");
+
+  const onTabKeyDown = (e, index) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const next = (index + (e.key === "ArrowRight" ? 1 : -1) + TABS.length) % TABS.length;
+    setActiveTab(TABS[next].id);
+    tabRefs.current[TABS[next].id]?.focus();
+  };
+
+  const tabCounts = {
+    courses: countFor(courses),
+    resources: countFor(resources),
+    events: countFor(events),
+    inquiries: inquiries.status === "ready" ? newInquiries.length : null,
+    users: countFor(users)
+  };
+
   return (
-    <div>
-      <div className="section-header">
-        <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <span className="badge badge-amber">Admin Control Center</span>
-            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Role-Based Access Verified</span>
-          </div>
-          <h2 className="section-title">Faculty & Platform Management Console</h2>
-          <p className="section-subtitle">
-            Manage courses, publish learning assets, schedule workshops, and handle student inquiries.
-          </p>
-        </div>
+    <div className="page" style={{ gap: 24 }}>
+      <PageHeader
+        eyebrow={<><Icon name="shield" size={14} /> Admin console</>}
+        title="Manage the portal"
+        lead="Publish courses and resources, schedule events, respond to student inquiries, and check service status."
+        actions={
+          <button type="button" className="btn btn-secondary" onClick={() => { loadAll(); runHealthCheck(); }}>
+            <Icon name="refresh" size={16} />
+            Refresh data
+          </button>
+        }
+      />
+
+      <div className="tab-list tab-list-scroll" role="tablist" aria-label="Admin sections">
+        {TABS.map((tab, index) => (
+          <button
+            key={tab.id}
+            ref={(el) => (tabRefs.current[tab.id] = el)}
+            type="button"
+            role="tab"
+            id={`admin-tab-${tab.id}`}
+            className="tab"
+            aria-selected={activeTab === tab.id}
+            aria-controls={`admin-panel-${tab.id}`}
+            tabIndex={activeTab === tab.id ? 0 : -1}
+            onClick={() => setActiveTab(tab.id)}
+            onKeyDown={(e) => onTabKeyDown(e, index)}
+          >
+            {tab.label}
+            {typeof tabCounts[tab.id] === "number" && (
+              <span className={`badge ${tab.id === "inquiries" && tabCounts.inquiries > 0 ? "badge-warning" : "badge-neutral"}`}>
+                {tabCounts[tab.id]}
+                {tab.id === "inquiries" && <span className="visually-hidden"> new</span>}
+              </span>
+            )}
+          </button>
+        ))}
       </div>
 
-      {/* Admin Tab Switcher */}
-      <div className="toolbar-container" style={{ padding: "8px 12px" }}>
-        <div className="filter-pills">
-          <button
-            type="button"
-            className={`filter-pill ${activeTab === "overview" ? "active" : ""}`}
-            onClick={() => setActiveTab("overview")}
-          >
-            Overview
-          </button>
-          <button
-            type="button"
-            className={`filter-pill ${activeTab === "courses" ? "active" : ""}`}
-            onClick={() => setActiveTab("courses")}
-          >
-            Courses ({courses.length})
-          </button>
-          <button
-            type="button"
-            className={`filter-pill ${activeTab === "resources" ? "active" : ""}`}
-            onClick={() => setActiveTab("resources")}
-          >
-            Resources ({resources.length})
-          </button>
-          <button
-            type="button"
-            className={`filter-pill ${activeTab === "events" ? "active" : ""}`}
-            onClick={() => setActiveTab("events")}
-          >
-            Events ({events.length})
-          </button>
-          <button
-            type="button"
-            className={`filter-pill ${activeTab === "inquiries" ? "active" : ""}`}
-            onClick={() => setActiveTab("inquiries")}
-          >
-            Inquiries ({inquiries.length})
-          </button>
-          <button
-            type="button"
-            className={`filter-pill ${activeTab === "users" ? "active" : ""}`}
-            onClick={() => setActiveTab("users")}
-          >
-            Users ({users.length})
-          </button>
-        </div>
-      </div>
-
-      {/* Tab: Overview */}
-      {activeTab === "overview" && (
-        <div>
-          <div className="stats-ribbon">
-            <div className="stat-metric-card">
-              <div className="stat-icon-wrapper" style={{ backgroundColor: "var(--accent-primary-subtle)", color: "var(--accent-primary)" }}>
-                <Icon name="user" size={22} />
-              </div>
-              <div>
-                <div className="stat-value">{users.length}</div>
-                <div className="stat-label">Registered Accounts</div>
-              </div>
+      <div role="tabpanel" id={`admin-panel-${activeTab}`} aria-labelledby={`admin-tab-${activeTab}`} tabIndex={0} style={{ outline: "none" }}>
+        {activeTab === "overview" && (
+          <div className="stack-lg">
+            <div className="stat-grid">
+              <AdminStat label="Registered accounts" icon="users" state={users} />
+              <AdminStat label="Published courses" icon="book" state={courses} />
+              <AdminStat label="Study resources" icon="file-text" state={resources} />
+              <AdminStat label="New inquiries" icon="mail" state={inquiries} value={newInquiries.length} />
             </div>
 
-            <div className="stat-metric-card">
-              <div className="stat-icon-wrapper" style={{ backgroundColor: "var(--accent-cyan-subtle)", color: "var(--accent-cyan)" }}>
-                <Icon name="book" size={22} />
-              </div>
-              <div>
-                <div className="stat-value">{courses.length}</div>
-                <div className="stat-label">Active Courses</div>
-              </div>
-            </div>
-
-            <div className="stat-metric-card">
-              <div className="stat-icon-wrapper" style={{ backgroundColor: "var(--status-warning-bg)", color: "var(--status-warning)" }}>
-                <Icon name="download" size={22} />
-              </div>
-              <div>
-                <div className="stat-value">{resources.length}</div>
-                <div className="stat-label">Learning Resources</div>
-              </div>
-            </div>
-
-            <div className="stat-metric-card">
-              <div className="stat-icon-wrapper" style={{ backgroundColor: "var(--status-success-bg)", color: "var(--status-success)" }}>
-                <Icon name="mail" size={22} />
-              </div>
-              <div>
-                <div className="stat-value">
-                  {inquiries.filter((i) => i.status === "NEW").length}
-                </div>
-                <div className="stat-label">Pending Inquiries</div>
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, marginTop: 24 }}>
-            <div className="card">
-              <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: "0 0 12px" }}>
-                Downstream Microservices Health
-              </h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: "0.8125rem" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "var(--bg-surface-subtle)", borderRadius: "var(--radius-md)" }}>
-                  <span>User Service (Port 8081)</span>
-                  <span className="badge badge-green">Healthy</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "var(--bg-surface-subtle)", borderRadius: "var(--radius-md)" }}>
-                  <span>Course Service (Port 8082)</span>
-                  <span className="badge badge-green">Healthy</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "var(--bg-surface-subtle)", borderRadius: "var(--radius-md)" }}>
-                  <span>Resource Service (Port 8083)</span>
-                  <span className="badge badge-green">Healthy</span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "var(--bg-surface-subtle)", borderRadius: "var(--radius-md)" }}>
-                  <span>Engagement Service (Port 8084)</span>
-                  <span className="badge badge-green">Healthy</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="card">
-              <h3 style={{ fontSize: "1rem", fontWeight: 700, margin: "0 0 12px" }}>
-                Recent Student Inquiries
-              </h3>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {inquiries.slice(0, 3).map((inq) => (
-                  <div key={inq.id} style={{ padding: "8px 12px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-md)", fontSize: "0.8125rem" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <strong>{inq.name}</strong>
-                      <span className={`badge ${inq.status === "RESOLVED" ? "badge-green" : "badge-amber"}`}>
-                        {inq.status}
-                      </span>
-                    </div>
-                    <div style={{ color: "var(--text-secondary)", marginTop: 4 }}>
-                      {inq.message}
-                    </div>
+            <div className="grid-2" style={{ alignItems: "start" }}>
+              <section className="card" aria-labelledby="status-heading">
+                <div className="card-head">
+                  <div>
+                    <h2 id="status-heading">Service status</h2>
+                    <p className="small muted">Visible to administrators only.</p>
                   </div>
-                ))}
-              </div>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={runHealthCheck} disabled={health.status === "loading"}>
+                    {health.status === "loading" ? <Spinner /> : <Icon name="refresh" size={14} />}
+                    Check now
+                  </button>
+                </div>
+                {health.status === "error" && (
+                  <div style={{ marginBottom: 12 }}>
+                    <Alert type="error" title="Status check failed">{health.error}</Alert>
+                  </div>
+                )}
+                <ul className="list-plain" aria-live="polite">
+                  {SERVICES.map((svc) => {
+                    const value = health.data?.[svc.key];
+                    const up = typeof value === "string" && value.toUpperCase().startsWith("UP");
+                    const label = health.status === "ready" ? (value ? (up ? "Operational" : "Unavailable") : "Not reported") : health.status === "error" ? "Unknown" : "Checking…";
+                    return (
+                      <li key={svc.key} className="status-row">
+                        <span className="row" style={{ gap: 10 }}>
+                          <span className={`status-dot ${health.status === "ready" && value ? (up ? "up" : "down") : ""}`} aria-hidden="true" />
+                          {svc.label}
+                        </span>
+                        <span className={`badge ${health.status === "ready" && value ? (up ? "badge-success" : "badge-danger") : "badge-neutral"}`}>{label}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {health.checkedAt && (
+                  <p className="small muted" style={{ marginTop: 12 }}>
+                    Last checked {health.checkedAt.toLocaleTimeString()}
+                  </p>
+                )}
+              </section>
+
+              <section className="card" aria-labelledby="recent-inq-heading">
+                <div className="card-head">
+                  <h2 id="recent-inq-heading">Recent inquiries</h2>
+                  <button type="button" className="text-link" onClick={() => setActiveTab("inquiries")}>View all</button>
+                </div>
+                {inquiries.status === "loading" && <LoadingRows count={3} label="Loading inquiries" />}
+                {inquiries.status === "error" && <ErrorState compact title="Inquiries couldn't be loaded" description={inquiries.error} onRetry={() => load(setInquiries, async () => unwrapList(await fetchAllInquiries()))} />}
+                {inquiries.status === "ready" && inquiries.data.length === 0 && <p className="small muted">No inquiries have been submitted yet.</p>}
+                {inquiries.status === "ready" && inquiries.data.length > 0 && (
+                  <ul className="list-plain">
+                    {inquiries.data.slice(0, 4).map((inq) => (
+                      <li key={inq.id} className="list-row" style={{ alignItems: "flex-start" }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div className="row-between">
+                            <span className="list-row-title">{inq.name}</span>
+                            <span className={`badge ${inquiryBadge(inq.status)}`}>{inquiryLabel(inq.status)}</span>
+                          </div>
+                          <p className="list-row-sub" style={{ marginTop: 4, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                            {inq.message}
+                          </p>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Tab: Courses */}
-      {activeTab === "courses" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 28, alignItems: "start" }}>
-          <div className="table-wrapper">
-            <table className="enterprise-table">
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Title</th>
-                  <th>Level</th>
-                  <th>Duration</th>
-                </tr>
-              </thead>
-              <tbody>
-                {courses.map((c) => (
-                  <tr key={c.id || c.code}>
-                    <td><span className="badge badge-gray">{c.code}</span></td>
-                    <td><strong>{c.title}</strong></td>
-                    <td>{c.level}</td>
-                    <td>{c.durationHours || 10}h</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Create Course Form */}
-          <div className="card">
-            <h3 style={{ fontSize: "1.0625rem", fontWeight: 700, margin: "0 0 16px" }}>
-              Publish New Course
-            </h3>
-            <form onSubmit={handleCreateCourse}>
-              <div className="form-group">
-                <label className="form-label">Course Code *</label>
-                <input
-                  className="form-input"
-                  value={newCourse.code}
-                  onChange={(e) => setNewCourse({ ...newCourse, code: e.target.value.toUpperCase() })}
-                  placeholder="e.g. CS-DOCKER"
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Course Title *</label>
-                <input
-                  className="form-input"
-                  value={newCourse.title}
-                  onChange={(e) => setNewCourse({ ...newCourse, title: e.target.value })}
-                  placeholder="e.g. Docker & Kubernetes Architecture"
-                  required
-                />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div className="form-group">
-                  <label className="form-label">Level</label>
-                  <select
-                    className="form-select"
-                    value={newCourse.level}
-                    onChange={(e) => setNewCourse({ ...newCourse, level: e.target.value })}
-                  >
-                    <option value="Beginner">Beginner</option>
-                    <option value="Intermediate">Intermediate</option>
-                    <option value="Advanced">Advanced</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Duration (Hours)</label>
-                  <input
-                    className="form-input"
-                    type="number"
-                    min="1"
-                    value={newCourse.durationHours}
-                    onChange={(e) => setNewCourse({ ...newCourse, durationHours: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Description *</label>
-                <textarea
-                  className="form-textarea"
-                  rows="3"
-                  value={newCourse.description}
-                  onChange={(e) => setNewCourse({ ...newCourse, description: e.target.value })}
-                  placeholder="Course overview and syllabus topics..."
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="btn btn-primary"
-                style={{ width: "100%" }}
-                disabled={submittingAction}
-              >
-                {submittingAction ? "Publishing to Course Service..." : "Publish Course"}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Tab: Resources */}
-      {activeTab === "resources" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 28, alignItems: "start" }}>
-          <div className="table-wrapper">
-            <table className="enterprise-table">
-              <thead>
-                <tr>
-                  <th>Title</th>
-                  <th>Type</th>
-                  <th>Downloads</th>
-                </tr>
-              </thead>
-              <tbody>
-                {resources.map((r) => (
-                  <tr key={r.id || r.title}>
-                    <td><strong>{r.title}</strong></td>
-                    <td><span className="badge badge-cyan">{r.resourceType}</span></td>
-                    <td>{r.downloadCount || 0}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Add Resource Form */}
-          <div className="card">
-            <h3 style={{ fontSize: "1.0625rem", fontWeight: 700, margin: "0 0 16px" }}>
-              Add Learning Asset
-            </h3>
-            <form onSubmit={handleCreateResource}>
-              <div className="form-group">
-                <label className="form-label">Asset Title *</label>
-                <input
-                  className="form-input"
-                  value={newResource.title}
-                  onChange={(e) => setNewResource({ ...newResource, title: e.target.value })}
-                  placeholder="e.g. Distributed Consensus Slides"
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Asset Type</label>
-                <select
-                  className="form-select"
-                  value={newResource.resourceType}
-                  onChange={(e) => setNewResource({ ...newResource, resourceType: e.target.value })}
-                >
-                  <option value="NOTES">NOTES (Lecture Slides)</option>
-                  <option value="EXERCISES">EXERCISES (Coding Lab)</option>
-                  <option value="PROJECTS">PROJECTS (Starters)</option>
-                  <option value="CHEATSHEET">CHEATSHEET (Quick Ref)</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Description *</label>
-                <textarea
-                  className="form-textarea"
-                  rows="3"
-                  value={newResource.description}
-                  onChange={(e) => setNewResource({ ...newResource, description: e.target.value })}
-                  placeholder="Describe contents of study asset..."
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="btn btn-primary"
-                style={{ width: "100%" }}
-                disabled={submittingAction}
-              >
-                {submittingAction ? "Adding to Resource Service..." : "Upload Resource Asset"}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Tab: Events */}
-      {activeTab === "events" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 28, alignItems: "start" }}>
-          <div className="table-wrapper">
-            <table className="enterprise-table">
-              <thead>
-                <tr>
-                  <th>Title</th>
-                  <th>Date</th>
-                  <th>Venue</th>
-                  <th>Capacity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {events.map((e) => (
-                  <tr key={e.id || e.title}>
-                    <td><strong>{e.title}</strong></td>
-                    <td>{e.eventDate}</td>
-                    <td>{e.venue}</td>
-                    <td>{e.capacity || 100}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Add Event Form */}
-          <div className="card">
-            <h3 style={{ fontSize: "1.0625rem", fontWeight: 700, margin: "0 0 16px" }}>
-              Schedule Academic Event
-            </h3>
-            <form onSubmit={handleCreateEvent}>
-              <div className="form-group">
-                <label className="form-label">Event Title *</label>
-                <input
-                  className="form-input"
-                  value={newEvent.title}
-                  onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })}
-                  placeholder="e.g. Spring Cloud Microservices Seminar"
-                  required
-                />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div className="form-group">
-                  <label className="form-label">Date *</label>
-                  <input
-                    className="form-input"
-                    value={newEvent.eventDate}
-                    onChange={(e) => setNewEvent({ ...newEvent, eventDate: e.target.value })}
-                    placeholder="e.g. 25 November 2026"
-                    required
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Capacity</label>
-                  <input
-                    className="form-input"
-                    type="number"
-                    min="10"
-                    value={newEvent.capacity}
-                    onChange={(e) => setNewEvent({ ...newEvent, capacity: e.target.value })}
-                    required
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Venue *</label>
-                <input
-                  className="form-input"
-                  value={newEvent.venue}
-                  onChange={(e) => setNewEvent({ ...newEvent, venue: e.target.value })}
-                  placeholder="e.g. Main Auditorium / Virtual Room 1"
-                  required
-                />
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Description</label>
-                <textarea
-                  className="form-textarea"
-                  rows="2"
-                  value={newEvent.description}
-                  onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })}
-                  placeholder="Agenda and workshop objectives..."
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="btn btn-primary"
-                style={{ width: "100%" }}
-                disabled={submittingAction}
-              >
-                {submittingAction ? "Publishing to Engagement Service..." : "Schedule Event"}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Tab: Inquiries */}
-      {activeTab === "inquiries" && (
-        <div className="table-wrapper">
-          <table className="enterprise-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Student Name</th>
-                <th>Email</th>
-                <th>Message</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {inquiries.map((inq) => (
-                <tr key={inq.id}>
-                  <td>#{inq.id}</td>
-                  <td><strong>{inq.name}</strong></td>
-                  <td>{inq.email}</td>
-                  <td style={{ maxWidth: 300 }}>{inq.message}</td>
-                  <td>
-                    <span className={`badge ${inq.status === "RESOLVED" ? "badge-green" : inq.status === "IN_PROGRESS" ? "badge-blue" : "badge-amber"}`}>
-                      {inq.status}
-                    </span>
+        {activeTab === "courses" && (
+          <div className="layout-sidebar">
+            <DataTable
+              state={courses}
+              caption="Published courses"
+              emptyText="No courses have been published yet."
+              onRetry={() => load(setCourses, fetchCourses)}
+              columns={["Course", "Level", "Duration"]}
+              renderRow={(c) => (
+                <tr key={c.id ?? c.code}>
+                  <td data-label="Course" className="cell-wrap">
+                    <div className="cell-strong">{c.title}</div>
+                    <div className="cell-sub">{c.code}</div>
                   </td>
-                  <td>
-                    {inq.status !== "RESOLVED" ? (
-                      <button
-                        type="button"
-                        className="btn btn-success btn-sm"
-                        style={{ padding: "4px 8px", fontSize: "0.75rem" }}
-                        onClick={() => handleUpdateInquiryStatus(inq.id, "RESOLVED")}
-                      >
+                  <td data-label="Level"><span className={`badge ${levelBadgeClass(c.level)}`}>{formatLevel(c.level)}</span></td>
+                  <td data-label="Duration">{c.durationHours ? `${c.durationHours} hrs` : "—"}</td>
+                </tr>
+              )}
+            />
+
+            <FormCard title="Publish a course" error={formError.course} onSubmit={handleCreateCourse}>
+              <Field id="course-code" label="Course code" hint="e.g. CS-301">
+                <input id="course-code" className="form-input" value={newCourse.code} onChange={(e) => setNewCourse({ ...newCourse, code: e.target.value.toUpperCase() })} required autoCapitalize="characters" />
+              </Field>
+              <Field id="course-title" label="Title">
+                <input id="course-title" className="form-input" value={newCourse.title} onChange={(e) => setNewCourse({ ...newCourse, title: e.target.value })} required minLength={2} maxLength={100} />
+              </Field>
+              <div className="form-row">
+                <Field id="course-level" label="Level">
+                  <select id="course-level" className="form-select" value={newCourse.level} onChange={(e) => setNewCourse({ ...newCourse, level: e.target.value })}>
+                    <option>Beginner</option>
+                    <option>Intermediate</option>
+                    <option>Advanced</option>
+                  </select>
+                </Field>
+                <Field id="course-hours" label="Duration (hours)">
+                  <input id="course-hours" className="form-input" type="number" min="1" max="500" value={newCourse.durationHours} onChange={(e) => setNewCourse({ ...newCourse, durationHours: e.target.value })} required />
+                </Field>
+              </div>
+              <Field id="course-desc" label="Description" hint="What students will learn.">
+                <textarea id="course-desc" className="form-textarea" rows={3} value={newCourse.description} onChange={(e) => setNewCourse({ ...newCourse, description: e.target.value })} required />
+              </Field>
+              <SubmitButton busy={submitting === "course"} label="Publish course" busyLabel="Publishing…" />
+            </FormCard>
+          </div>
+        )}
+
+        {activeTab === "resources" && (
+          <div className="layout-sidebar">
+            <DataTable
+              state={resources}
+              caption="Study resources"
+              emptyText="No resources have been added yet."
+              onRetry={() => load(setResources, fetchResources)}
+              columns={["Resource", "Type", "Downloads"]}
+              renderRow={(r) => (
+                <tr key={r.id ?? r.title}>
+                  <td data-label="Resource" className="cell-wrap"><div className="cell-strong">{r.title}</div></td>
+                  <td data-label="Type"><span className={`badge ${resourceTypeInfo(r.resourceType).badge}`}>{resourceTypeInfo(r.resourceType).label}</span></td>
+                  <td data-label="Downloads">{typeof r.downloadCount === "number" ? r.downloadCount.toLocaleString() : "—"}</td>
+                </tr>
+              )}
+            />
+
+            <FormCard title="Add a study resource" error={formError.resource} onSubmit={handleCreateResource}>
+              <Field id="res-title" label="Title">
+                <input id="res-title" className="form-input" value={newResource.title} onChange={(e) => setNewResource({ ...newResource, title: e.target.value })} required />
+              </Field>
+              <Field id="res-type" label="Type">
+                <select id="res-type" className="form-select" value={newResource.resourceType} onChange={(e) => setNewResource({ ...newResource, resourceType: e.target.value })}>
+                  {Object.entries(RESOURCE_TYPES).map(([key, info]) => (
+                    <option key={key} value={key}>{info.label}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field id="res-url" label="File link" optional hint="A full https:// link opens the file directly for students.">
+                <input id="res-url" className="form-input" type="text" inputMode="url" value={newResource.fileUrl} onChange={(e) => setNewResource({ ...newResource, fileUrl: e.target.value })} placeholder="https://…" />
+              </Field>
+              <Field id="res-desc" label="Description">
+                <textarea id="res-desc" className="form-textarea" rows={3} value={newResource.description} onChange={(e) => setNewResource({ ...newResource, description: e.target.value })} required />
+              </Field>
+              <SubmitButton busy={submitting === "resource"} label="Add resource" busyLabel="Adding…" />
+            </FormCard>
+          </div>
+        )}
+
+        {activeTab === "events" && (
+          <div className="layout-sidebar">
+            <DataTable
+              state={events}
+              caption="Scheduled events"
+              emptyText="No events have been scheduled yet."
+              onRetry={() => load(setEvents, fetchEvents)}
+              columns={["Event", "Date", "Venue", "Seats"]}
+              renderRow={(ev) => (
+                <tr key={ev.id ?? ev.title}>
+                  <td data-label="Event" className="cell-wrap"><div className="cell-strong">{ev.title}</div>{ev.organizer && <div className="cell-sub">{ev.organizer}</div>}</td>
+                  <td data-label="Date" style={{ whiteSpace: "nowrap" }}>{ev.eventDate}</td>
+                  <td data-label="Venue">{ev.venue}</td>
+                  <td data-label="Seats">{ev.capacity ? `${ev.registeredCount ?? 0} / ${ev.capacity}` : "—"}</td>
+                </tr>
+              )}
+            />
+
+            <FormCard title="Schedule an event" error={formError.event} onSubmit={handleCreateEvent}>
+              <Field id="ev-title" label="Title">
+                <input id="ev-title" className="form-input" value={newEvent.title} onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })} required />
+              </Field>
+              <div className="form-row">
+                <Field id="ev-date" label="Date">
+                  <input id="ev-date" className="form-input" type="date" value={newEvent.eventDate} onChange={(e) => setNewEvent({ ...newEvent, eventDate: e.target.value })} required />
+                </Field>
+                <Field id="ev-cap" label="Capacity">
+                  <input id="ev-cap" className="form-input" type="number" min="1" value={newEvent.capacity} onChange={(e) => setNewEvent({ ...newEvent, capacity: e.target.value })} required />
+                </Field>
+              </div>
+              <Field id="ev-venue" label="Venue">
+                <input id="ev-venue" className="form-input" value={newEvent.venue} onChange={(e) => setNewEvent({ ...newEvent, venue: e.target.value })} placeholder="e.g. Main Auditorium" required />
+              </Field>
+              <Field id="ev-org" label="Organiser" optional>
+                <input id="ev-org" className="form-input" value={newEvent.organizer} onChange={(e) => setNewEvent({ ...newEvent, organizer: e.target.value })} placeholder="e.g. Department of Computer Science" />
+              </Field>
+              <Field id="ev-desc" label="Description" optional>
+                <textarea id="ev-desc" className="form-textarea" rows={2} value={newEvent.description} onChange={(e) => setNewEvent({ ...newEvent, description: e.target.value })} />
+              </Field>
+              <SubmitButton busy={submitting === "event"} label="Schedule event" busyLabel="Scheduling…" />
+            </FormCard>
+          </div>
+        )}
+
+        {activeTab === "inquiries" && (
+          <DataTable
+            state={inquiries}
+            caption="Student inquiries"
+            emptyText="No inquiries have been submitted yet."
+            onRetry={() => load(setInquiries, async () => unwrapList(await fetchAllInquiries()))}
+            columns={["From", "Message", "Status", "Actions"]}
+            renderRow={(inq) => (
+              <tr key={inq.id}>
+                <td data-label="From">
+                  <div className="cell-strong">{inq.name}</div>
+                  <div className="cell-sub"><a href={`mailto:${inq.email}`}>{inq.email}</a></div>
+                </td>
+                <td data-label="Message" className="cell-wrap">{inq.message}</td>
+                <td data-label="Status"><span className={`badge ${inquiryBadge(inq.status)}`}>{inquiryLabel(inq.status)}</span></td>
+                <td data-label="Actions">
+                  {inq.status === "RESOLVED" ? (
+                    <span className="small muted">Closed</span>
+                  ) : (
+                    <div className="row" style={{ flexWrap: "nowrap" }}>
+                      {(inq.status || "NEW") === "NEW" && (
+                        <button type="button" className="btn btn-secondary btn-sm" disabled={updatingInquiry === inq.id} onClick={() => handleUpdateInquiryStatus(inq, "IN_PROGRESS")}>
+                          Start
+                        </button>
+                      )}
+                      <button type="button" className="btn btn-primary btn-sm" disabled={updatingInquiry === inq.id} onClick={() => handleUpdateInquiryStatus(inq, "RESOLVED")} aria-label={`Mark inquiry from ${inq.name} as resolved`}>
+                        {updatingInquiry === inq.id ? <Spinner /> : null}
                         Resolve
                       </button>
-                    ) : (
-                      <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Closed</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {/* Tab: Users */}
-      {activeTab === "users" && (
-        <div className="table-wrapper">
-          <table className="enterprise-table">
-            <thead>
-              <tr>
-                <th>User ID</th>
-                <th>Username</th>
-                <th>Full Name</th>
-                <th>Email</th>
-                <th>Role</th>
+                    </div>
+                  )}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id || u.username}>
-                  <td>#{u.id}</td>
-                  <td><strong>{u.username}</strong></td>
-                  <td>{u.firstName} {u.lastName}</td>
-                  <td>{u.email}</td>
-                  <td>
-                    <span className={`badge ${u.role === "ROLE_ADMIN" ? "badge-amber" : "badge-blue"}`}>
-                      {u.role}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+            )}
+          />
+        )}
+
+        {activeTab === "users" && (
+          <DataTable
+            state={users}
+            caption="Registered accounts"
+            emptyText="No accounts found."
+            onRetry={() => load(setUsers, async () => unwrapList(await getAllUsers()))}
+            columns={["Name", "Username", "Email", "Role"]}
+            renderRow={(u) => (
+              <tr key={u.id ?? u.username}>
+                <td data-label="Name" className="cell-strong">{[u.firstName, u.lastName].filter(Boolean).join(" ") || "—"}</td>
+                <td data-label="Username">{u.username}</td>
+                <td data-label="Email" style={{ overflowWrap: "anywhere" }}>{u.email}</td>
+                <td data-label="Role">
+                  <span className={`badge ${u.role === "ROLE_ADMIN" ? "badge-warning" : "badge-primary"}`}>
+                    {u.role === "ROLE_ADMIN" ? "Administrator" : "Student"}
+                  </span>
+                </td>
+              </tr>
+            )}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
+function AdminStat({ label, icon, state, value }) {
+  return (
+    <div className="stat-card">
+      <span className="stat-label"><Icon name={icon} size={16} />{label}</span>
+      {state.status === "loading" && <span className="skeleton" style={{ height: 28, width: 56 }} aria-label="Loading" />}
+      {state.status === "error" && <span className="stat-value" title="Couldn't load">—</span>}
+      {state.status === "error" && <span className="stat-note">Couldn't load</span>}
+      {state.status === "ready" && <span className="stat-value">{value ?? state.data.length}</span>}
+    </div>
+  );
+}
+
+function DataTable({ state, caption, columns, renderRow, emptyText, onRetry }) {
+  if (state.status === "loading") return <LoadingRows count={4} label={`Loading ${caption.toLowerCase()}`} />;
+  if (state.status === "error") return <ErrorState title={`${caption} couldn't be loaded`} description={state.error} onRetry={onRetry} compact />;
+  if (state.data.length === 0) return <EmptyState icon="list" title={emptyText} compact />;
+  return (
+    <div className="table-wrapper">
+      <table className="data-table table-responsive">
+        <caption className="visually-hidden">{caption}</caption>
+        <thead>
+          <tr>
+            {columns.map((c) => (
+              <th key={c} scope="col">{c}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{state.data.map(renderRow)}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function FormCard({ title, error, onSubmit, children }) {
+  return (
+    <section className="card" aria-label={title}>
+      <h2 style={{ fontSize: "var(--text-md)", fontWeight: 600, marginBottom: 16 }}>{title}</h2>
+      {error && (
+        <div style={{ marginBottom: 16 }}>
+          <Alert type="error">{error}</Alert>
+        </div>
+      )}
+      <form onSubmit={onSubmit}>{children}</form>
+    </section>
+  );
+}
+
+function Field({ id, label, hint, optional, children }) {
+  return (
+    <div className="form-group">
+      <label className="form-label" htmlFor={id}>
+        {label}
+        {optional && <span className="optional">(optional)</span>}
+      </label>
+      {children}
+      {hint && <span className="form-hint">{hint}</span>}
+    </div>
+  );
+}
+
+function SubmitButton({ busy, label, busyLabel }) {
+  return (
+    <button type="submit" className="btn btn-primary btn-block" disabled={busy} aria-busy={busy}>
+      {busy ? <><Spinner /> {busyLabel}</> : label}
+    </button>
+  );
+}

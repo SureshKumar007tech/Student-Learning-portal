@@ -9,28 +9,47 @@ import com.portal.course.repository.CourseRepository;
 import com.portal.course.service.impl.CourseServiceImpl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
 
-@ExtendWith(MockitoExtension.class)
 class CourseServiceTest {
 
-    @Mock
-    private CourseRepository courseRepository;
-
+    private CourseRepositoryStub courseRepository;
     private CourseServiceImpl courseService;
+
+    static class CourseRepositoryStub extends CourseRepository {
+        List<Course> allCourses = new ArrayList<>();
+        Course singleCourse;
+        boolean codeExists = false;
+
+        public CourseRepositoryStub() {
+            super(null);
+        }
+
+        @Override
+        public List<Course> findAll() {
+            return allCourses;
+        }
+
+        @Override
+        public Optional<Course> findById(Long id) {
+            return Optional.ofNullable(singleCourse);
+        }
+
+        @Override
+        public boolean existsByCode(String code) {
+            return codeExists;
+        }
+    }
 
     @BeforeEach
     void setUp() {
+        courseRepository = new CourseRepositoryStub();
         courseService = new CourseServiceImpl(courseRepository);
     }
 
@@ -48,7 +67,7 @@ class CourseServiceTest {
         c2.setTitle("React");
         c2.setLevel("Intermediate");
 
-        when(courseRepository.findAll()).thenReturn(List.of(c1, c2));
+        courseRepository.allCourses = List.of(c1, c2);
 
         List<CourseResponse> result = courseService.getAllCourses("All");
 
@@ -65,7 +84,7 @@ class CourseServiceTest {
         c.setTitle("HTML");
         c.setLevel("Beginner");
 
-        when(courseRepository.findById(1L)).thenReturn(Optional.of(c));
+        courseRepository.singleCourse = c;
 
         CourseResponse result = courseService.getCourseById(1L);
 
@@ -75,7 +94,7 @@ class CourseServiceTest {
 
     @Test
     void getCourseById_WhenNotFound_ShouldThrowException() {
-        when(courseRepository.findById(99L)).thenReturn(Optional.empty());
+        courseRepository.singleCourse = null;
 
         assertThatThrownBy(() -> courseService.getCourseById(99L))
                 .isInstanceOf(ResourceNotFoundException.class);
@@ -84,11 +103,10 @@ class CourseServiceTest {
     @Test
     void createCourse_WhenDuplicateCode_ShouldThrowException() {
         CreateCourseRequest request = new CreateCourseRequest("CS-HTML", "HTML", "Desc", "Beginner", 1L, 10);
-        when(courseRepository.existsByCode("CS-HTML")).thenReturn(true);
+        courseRepository.codeExists = true;
 
         assertThatThrownBy(() -> courseService.createCourse(request))
                 .isInstanceOf(DuplicateResourceException.class)
                 .hasMessageContaining("already exists");
     }
 }
-

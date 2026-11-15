@@ -1,124 +1,153 @@
-import { useState, useRef, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "../hooks/AuthContext";
+import { fetchEvents, fetchMyEventRegistrations } from "../services/eventService";
 import Icon from "./Icons";
+import { Spinner } from "./ui";
 
+/**
+ * Notification panel. Only shows reminders backed by real data — the
+ * signed-in student's confirmed event registrations. Nothing is invented.
+ */
 export default function NotificationDropdown() {
+  const { isAuthenticated, openAuthModal } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
-  const [notifications, setNotifications] = useState([
-    {
-      id: 1,
-      title: "New Course Available",
-      desc: "Spring Boot Microservices & Gateway course is now open for enrollment.",
-      time: "10m ago",
-      read: false,
-      type: "course"
-    },
-    {
-      id: 2,
-      title: "Upcoming Event RSVP",
-      desc: "Microservices Architecture Hackathon registration closes this Friday.",
-      time: "1h ago",
-      read: false,
-      type: "event"
-    },
-    {
-      id: 3,
-      title: "System Status Normal",
-      desc: "All 5 microservices healthy via Port 8080 API Gateway.",
-      time: "3h ago",
-      read: true,
-      type: "system"
-    }
-  ]);
+  const [state, setState] = useState({ status: "idle", items: [] });
+  const wrapperRef = useRef(null);
+  const buttonRef = useRef(null);
 
-  const dropdownRef = useRef(null);
-
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsOpen(false);
-      }
+  const load = useCallback(async () => {
+    setState((prev) => ({ ...prev, status: "loading" }));
+    try {
+      const [registrations, events] = await Promise.all([fetchMyEventRegistrations(), fetchEvents()]);
+      const registeredIds = new Set(
+        registrations.filter((r) => (r.status || "CONFIRMED").toUpperCase() !== "CANCELLED").map((r) => r.eventId)
+      );
+      setState({ status: "ready", items: events.filter((e) => registeredIds.has(e.id)) });
+    } catch {
+      setState({ status: "error", items: [] });
     }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+  useEffect(() => {
+    if (isOpen && isAuthenticated) load();
+  }, [isOpen, isAuthenticated, load]);
 
-  const markAllAsRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  };
+  useEffect(() => {
+    if (!isAuthenticated) setState({ status: "idle", items: [] });
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const handleClick = (e) => wrapperRef.current && !wrapperRef.current.contains(e.target) && setIsOpen(false);
+    const handleKey = (e) => {
+      if (e.key === "Escape") {
+        setIsOpen(false);
+        buttonRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [isOpen]);
 
   return (
-    <div className="user-profile-menu" ref={dropdownRef}>
+    <div className="menu-anchor" ref={wrapperRef}>
       <button
+        ref={buttonRef}
         type="button"
         className="icon-btn"
-        onClick={() => setIsOpen(!isOpen)}
-        aria-label="View notifications"
-        title="Notifications"
+        onClick={() => setIsOpen((v) => !v)}
+        aria-label="Reminders"
+        aria-expanded={isOpen}
+        aria-controls="reminders-panel"
+        title="Reminders"
       >
         <Icon name="bell" size={18} />
-        {unreadCount > 0 && <span className="notification-badge" />}
       </button>
 
       {isOpen && (
-        <div className="user-dropdown" style={{ width: "320px", right: 0, padding: 0 }}>
-          <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border-color)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontWeight: 700, fontSize: "0.875rem" }}>Notifications</span>
-            {unreadCount > 0 && (
-              <button
-                type="button"
-                className="btn-ghost"
-                onClick={markAllAsRead}
-                style={{ fontSize: "0.75rem", padding: "2px 6px" }}
-              >
-                Mark all read
-              </button>
+        <div id="reminders-panel" className="menu menu-wide" role="region" aria-label="Reminders">
+          <div className="menu-section-head">
+            <h2>Reminders</h2>
+            {isAuthenticated && state.status === "ready" && (
+              <span className="badge badge-neutral">{state.items.length}</span>
             )}
           </div>
 
-          <div style={{ maxHeight: "300px", overflowY: "auto" }}>
-            {notifications.map((n) => (
-              <div
-                key={n.id}
-                style={{
-                  padding: "12px 16px",
-                  borderBottom: "1px solid var(--border-color-subtle)",
-                  backgroundColor: n.read ? "transparent" : "var(--accent-primary-subtle)",
-                  display: "flex",
-                  gap: 12,
-                  alignItems: "flex-start",
-                  transition: "background-color 0.15s ease"
-                }}
-              >
-                <div style={{ marginTop: 2, color: "var(--accent-primary)" }}>
-                  {n.type === "course" && <Icon name="book" size={16} />}
-                  {n.type === "event" && <Icon name="calendar" size={16} />}
-                  {n.type === "system" && <Icon name="server" size={16} />}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: "0.8125rem", fontWeight: 600, color: "var(--text-primary)" }}>
-                    {n.title}
-                  </div>
-                  <div style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginTop: 2 }}>
-                    {n.desc}
-                  </div>
-                  <div style={{ fontSize: "0.6875rem", color: "var(--text-muted)", marginTop: 4 }}>
-                    {n.time}
-                  </div>
+          <div className="menu-scroll">
+            {!isAuthenticated && (
+              <div className="state state-compact" style={{ border: "none" }}>
+                <p className="state-desc">Sign in to see reminders for the events you've registered for.</p>
+                <div className="state-actions">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => {
+                      setIsOpen(false);
+                      openAuthModal("login");
+                    }}
+                  >
+                    Sign in
+                  </button>
                 </div>
               </div>
-            ))}
+            )}
+
+            {isAuthenticated && state.status === "loading" && (
+              <div className="row" style={{ padding: 16, justifyContent: "center", color: "var(--text-muted)" }} role="status">
+                <Spinner /> <span className="small">Loading reminders…</span>
+              </div>
+            )}
+
+            {isAuthenticated && state.status === "error" && (
+              <div className="state state-compact" style={{ border: "none" }} role="alert">
+                <p className="state-desc">We couldn't load your reminders right now.</p>
+                <div className="state-actions">
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={load}>
+                    Try again
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {isAuthenticated && state.status === "ready" && state.items.length === 0 && (
+              <div className="state state-compact" style={{ border: "none" }}>
+                <div className="state-icon"><Icon name="check" size={20} /></div>
+                <p className="state-title">You're all caught up</p>
+                <p className="state-desc">Register for an event and it will appear here.</p>
+              </div>
+            )}
+
+            {isAuthenticated &&
+              state.status === "ready" &&
+              state.items.map((evt) => (
+                <div key={evt.id} className="notice-item">
+                  <div className="notice-icon">
+                    <Icon name="calendar" size={16} />
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="notice-title">{evt.title}</div>
+                    <div className="notice-meta">
+                      You're registered · {[evt.eventDate, evt.venue].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                </div>
+              ))}
           </div>
 
-          <div style={{ padding: "8px 16px", borderTop: "1px solid var(--border-color)", textAlign: "center" }}>
-            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-              Microservices Event Streaming Active
-            </span>
-          </div>
+          {isAuthenticated && (
+            <div className="menu-foot">
+              <Link to="/events" onClick={() => setIsOpen(false)} className="text-link">
+                View all events <Icon name="arrow-right" size={12} />
+              </Link>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
-

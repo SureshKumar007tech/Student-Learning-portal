@@ -3,6 +3,7 @@ package com.portal.resource.controller;
 import com.portal.resource.dto.request.CreateResourceRequest;
 import com.portal.resource.dto.response.ApiResponse;
 import com.portal.resource.dto.response.ResourceResponse;
+import com.portal.resource.exception.ForbiddenException;
 import com.portal.resource.service.ResourceService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -34,7 +35,12 @@ public class ResourceController {
     }
 
     @PostMapping
-    public ResponseEntity<ApiResponse<ResourceResponse>> createResource(@Valid @RequestBody CreateResourceRequest request) {
+    public ResponseEntity<ApiResponse<ResourceResponse>> createResource(
+            @Valid @RequestBody CreateResourceRequest request,
+            @RequestHeader(value = "X-User-Role", required = false) String xUserRole) {
+        if (!"ROLE_ADMIN".equals(xUserRole) && !"ROLE_INSTRUCTOR".equals(xUserRole)) {
+            throw new ForbiddenException("Access denied: Only administrators and instructors can create learning resources");
+        }
         ResourceResponse res = resourceService.createResource(request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok("Resource created successfully", res));
@@ -46,4 +52,3 @@ public class ResourceController {
         return ResponseEntity.ok(ApiResponse.ok("Resource downloaded successfully", res));
     }
 }
-

@@ -2,12 +2,20 @@ import { useDebugValue, useEffect, useState } from "react";
 
 function useLocalStorage(key, initialValue) {
   const [value, setValue] = useState(() => {
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : initialValue;
+    try {
+      const saved = localStorage.getItem(key);
+      return saved ? JSON.parse(saved) : initialValue;
+    } catch {
+      return initialValue;
+    }
   });
 
   useEffect(() => {
-    localStorage.setItem(key, JSON.stringify(value));
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      // storage unavailable (private mode / quota) — keep in-memory value
+    }
   }, [key, value]);
 
   useDebugValue(`Stored: ${key}`);

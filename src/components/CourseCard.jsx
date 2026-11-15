@@ -4,33 +4,24 @@ import { useToast } from "../hooks/ToastContext";
 import { enrollInCourse } from "../services/courseService";
 import Icon from "./Icons";
 import ConfirmDialog from "./ConfirmDialog";
+import Modal from "./Modal";
+import { formatLevel, levelBadgeClass } from "./ui";
 
-export default function CourseCard({ course, onClick, onEnrollSuccess, isAlreadyEnrolled = false }) {
+export default function CourseCard({ course, onClick, onEnrollSuccess, isAlreadyEnrolled = false, headingLevel = 3 }) {
   const { user, isAuthenticated, openAuthModal } = useAuth();
   const toast = useToast();
 
-  const [enrolled, setEnrolled] = useState(isAlreadyEnrolled);
+  const [justEnrolled, setJustEnrolled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const getLevelBadge = (lvl) => {
-    switch (lvl?.toLowerCase()) {
-      case "beginner":
-        return <span className="badge badge-cyan">{lvl}</span>;
-      case "intermediate":
-        return <span className="badge badge-amber">{lvl}</span>;
-      case "advanced":
-        return <span className="badge badge-blue">{lvl}</span>;
-      default:
-        return <span className="badge badge-gray">{lvl || "All Levels"}</span>;
-    }
-  };
+  const enrolled = isAlreadyEnrolled || justEnrolled;
+  const Heading = `h${headingLevel}`;
 
-  const handleEnrollClick = (e) => {
-    e.stopPropagation();
+  const startEnroll = () => {
     if (!isAuthenticated) {
-      toast.warning("Please sign in or register to enroll in courses.");
+      toast.info("Sign in or create an account to enroll in courses.", "Sign in required");
       openAuthModal("login");
       return;
     }
@@ -40,166 +31,158 @@ export default function CourseCard({ course, onClick, onEnrollSuccess, isAlready
   const confirmEnrollment = async () => {
     setLoading(true);
     try {
-      const studentId = user?.userId || 1;
-      const res = await enrollInCourse(course.id, studentId);
+      const res = await enrollInCourse(course.id, user?.userId);
       if (res.success) {
-        setEnrolled(true);
+        setJustEnrolled(true);
         setConfirmOpen(false);
-        toast.success(`Enrolled in "${course.title}" successfully!`);
-        if (onEnrollSuccess) onEnrollSuccess(course);
+        toast.success(`You're enrolled in ${course.title}. It's now on your dashboard.`, "Enrolled");
+        onEnrollSuccess?.(course);
+      } else if (res.status === 409) {
+        // Already enrolled according to the server — reflect that honestly
+        setJustEnrolled(true);
+        setConfirmOpen(false);
+        toast.info("You're already enrolled in this course.", "Already enrolled");
+        onEnrollSuccess?.(course);
       } else {
-        toast.error(res.error || "Enrollment could not be completed.");
+        toast.error(res.error || "Enrollment couldn't be completed. Please try again.");
       }
     } catch {
-      setEnrolled(true);
-      setConfirmOpen(false);
-      toast.success(`Enrolled in "${course.title}"! (Offline demo mode)`);
-      if (onEnrollSuccess) onEnrollSuccess(course);
+      toast.error("Enrollment couldn't be completed. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
+  const openDetails = () => {
+    onClick?.(course);
+    setDetailsOpen(true);
+  };
+
   return (
     <>
-      <article className="card course-card">
+      <article className="card card-interactive">
         <div className="card-header-row">
-          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            {getLevelBadge(course.level)}
-            <span className="badge badge-gray">{course.code}</span>
+          <div className="row">
+            <span className={`badge ${levelBadgeClass(course.level)}`}>{formatLevel(course.level)}</span>
+            {course.code && <span className="badge badge-neutral badge-mono">{course.code}</span>}
           </div>
-          {course.durationHours && (
-            <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-              <Icon name="clock" size={14} />
-              {course.durationHours} hrs
+          {enrolled && (
+            <span className="badge badge-success">
+              <Icon name="check" size={12} /> Enrolled
             </span>
           )}
         </div>
 
-        <h3 className="card-title">{course.title}</h3>
-        <p className="card-desc">{course.description}</p>
+        <Heading className="card-title">{course.title}</Heading>
+        {course.description && <p className="card-desc">{course.description}</p>}
 
-        {course.instructor && (
-          <div style={{ fontSize: "0.8125rem", color: "var(--text-muted)", marginBottom: 16, display: "flex", alignItems: "center", gap: 6 }}>
-            <Icon name="user" size={14} />
-            <span>Instructor: <strong style={{ color: "var(--text-secondary)" }}>{course.instructor}</strong></span>
+        {(course.durationHours > 0 || course.instructor) && (
+          <div className="card-meta">
+            {course.durationHours > 0 && (
+              <span>
+                <Icon name="clock" size={14} />
+                {course.durationHours} hours
+              </span>
+            )}
+            {course.instructor && (
+              <span>
+                <Icon name="user" size={14} />
+                {course.instructor}
+              </span>
+            )}
           </div>
         )}
 
         <div className="card-footer">
           <button
             type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={() => {
-              if (onClick) onClick(course);
-              setDetailsOpen(true);
-            }}
+            className="btn btn-ghost btn-sm"
+            onClick={openDetails}
+            aria-label={`View details for ${course.title}`}
           >
-            Details
+            View details
           </button>
-
-          <button
-            type="button"
-            className={`btn btn-sm ${enrolled ? "btn-success" : "btn-primary"}`}
-            onClick={handleEnrollClick}
-            disabled={loading || enrolled}
-          >
-            {enrolled ? (
-              <>
-                <Icon name="check" size={14} />
-                Enrolled
-              </>
-            ) : loading ? (
-              "Enrolling..."
-            ) : (
-              "Enroll Now"
-            )}
-          </button>
+          {enrolled ? (
+            <span className="small muted">On your dashboard</span>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={startEnroll}
+              disabled={loading}
+              aria-label={`Enroll in ${course.title}`}
+            >
+              Enroll
+            </button>
+          )}
         </div>
       </article>
 
-      {/* Confirmation Dialog */}
       <ConfirmDialog
         isOpen={confirmOpen}
-        title="Confirm Course Enrollment"
-        message={`Do you want to enroll in "${course.title}" (${course.code})? This will add the course to your learning dashboard.`}
-        confirmText="Confirm Enrollment"
+        title="Enroll in this course?"
+        message={`${course.title}${course.code ? ` (${course.code})` : ""} will be added to your dashboard, where you can track your progress.`}
+        confirmText="Enroll"
+        loadingText="Enrolling…"
         loading={loading}
         onConfirm={confirmEnrollment}
         onCancel={() => setConfirmOpen(false)}
       />
 
-      {/* Course Details Modal */}
-      {detailsOpen && (
-        <div className="modal-backdrop" onClick={() => setDetailsOpen(false)}>
-          <div className="modal-dialog" style={{ maxWidth: "560px" }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div>
-                <span className="badge badge-blue" style={{ marginBottom: 6 }}>{course.code}</span>
-                <h3 className="modal-title">{course.title}</h3>
-              </div>
+      <Modal
+        isOpen={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        title={course.title}
+        subtitle={course.code}
+        size="md"
+        footer={
+          <>
+            <button type="button" className="btn btn-secondary" onClick={() => setDetailsOpen(false)}>
+              Close
+            </button>
+            {enrolled ? (
+              <span className="badge badge-success" style={{ alignSelf: "center" }}>
+                <Icon name="check" size={12} /> You're enrolled
+              </span>
+            ) : (
               <button
                 type="button"
-                className="modal-close-btn"
-                onClick={() => setDetailsOpen(false)}
-              >
-                <Icon name="x" size={18} />
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 20 }}>
-                <div style={{ background: "var(--bg-surface-subtle)", padding: "12px", borderRadius: "var(--radius-md)", textAlign: "center" }}>
-                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Level</div>
-                  <div style={{ fontWeight: 700, fontSize: "0.9375rem" }}>{course.level}</div>
-                </div>
-                <div style={{ background: "var(--bg-surface-subtle)", padding: "12px", borderRadius: "var(--radius-md)", textAlign: "center" }}>
-                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Estimated Duration</div>
-                  <div style={{ fontWeight: 700, fontSize: "0.9375rem" }}>{course.durationHours || 10} Hours</div>
-                </div>
-                <div style={{ background: "var(--bg-surface-subtle)", padding: "12px", borderRadius: "var(--radius-md)", textAlign: "center" }}>
-                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>Microservice Port</div>
-                  <div style={{ fontWeight: 700, fontSize: "0.9375rem" }}>Port 8082</div>
-                </div>
-              </div>
-
-              <h4 style={{ margin: "0 0 8px", fontSize: "0.9375rem" }}>Course Overview</h4>
-              <p style={{ fontSize: "0.875rem", color: "var(--text-secondary)", lineHeight: 1.6, margin: "0 0 16px" }}>
-                {course.description}
-              </p>
-
-              <h4 style={{ margin: "0 0 8px", fontSize: "0.9375rem" }}>Key Modules & Syllabus</h4>
-              <ul style={{ fontSize: "0.875rem", color: "var(--text-secondary)", paddingLeft: 20, margin: 0, lineHeight: 1.7 }}>
-                <li>Fundamentals & Architectural Theory</li>
-                <li>Component Lifecycle, State & Immutability</li>
-                <li>Production Integration with API Gateway & Spring Boot</li>
-                <li>Comprehensive QA Testing & Verification</li>
-              </ul>
-            </div>
-
-            <div className="modal-footer">
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => setDetailsOpen(false)}
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                className={`btn ${enrolled ? "btn-success" : "btn-primary"}`}
+                className="btn btn-primary"
                 onClick={() => {
                   setDetailsOpen(false);
-                  if (!enrolled) handleEnrollClick({ stopPropagation: () => {} });
+                  startEnroll();
                 }}
-                disabled={enrolled}
               >
-                {enrolled ? "Enrolled" : "Enroll in Course"}
+                Enroll in course
               </button>
+            )}
+          </>
+        }
+      >
+        <div className="modal-body">
+          <div className="fact-grid">
+            <div className="fact">
+              <div className="fact-label">Level</div>
+              <div className="fact-value">{formatLevel(course.level)}</div>
+            </div>
+            <div className="fact">
+              <div className="fact-label">Duration</div>
+              <div className="fact-value">{course.durationHours > 0 ? `${course.durationHours} hours` : "Not specified"}</div>
+            </div>
+            <div className="fact">
+              <div className="fact-label">Course code</div>
+              <div className="fact-value">{course.code || "—"}</div>
             </div>
           </div>
+
+          <h3 className="section-title-sm" style={{ fontSize: "var(--text-md)", marginBottom: 8 }}>
+            About this course
+          </h3>
+          <p style={{ color: "var(--text-secondary)", fontSize: "var(--text-base)", lineHeight: 1.65 }}>
+            {course.description || "No description has been added for this course yet."}
+          </p>
         </div>
-      )}
+      </Modal>
     </>
   );
 }
