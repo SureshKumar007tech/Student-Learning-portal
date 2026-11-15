@@ -134,9 +134,9 @@ Configure environment variables `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USER
 
 ### Opt-in Development Data Seeding
 To prevent populating production databases with test records:
-- In `application.yml` (local H2 in-memory profile), `portal.seed.enabled` defaults to `true` for out-of-the-box evaluation.
-- In `application-postgres.yml` (production profile), `portal.seed.enabled` strictly defaults to `false`.
-- First-run evaluation accounts (student `student` and administrator `admin`) are only seeded when `PORTAL_SEED_ENABLED=true`.
+- In both the local H2 and PostgreSQL profiles, `portal.seed.enabled` defaults to `false`.
+- Set `PORTAL_SEED_ENABLED=true` only when you explicitly want sample courses, resources, events, and evaluation accounts.
+- The student/admin accounts are created only when their corresponding `PORTAL_SEED_STUDENT_PASSWORD` and `PORTAL_SEED_ADMIN_PASSWORD` values are set; the application has no built-in fallback passwords.
 
 ### Data Lifecycle & Retention Guidelines
 - **User Data**: Passwords hashed with BCrypt (10 rounds). On account deletion, cascade deletes student profile and personal records.
@@ -196,6 +196,26 @@ mvn test -f backend/pom.xml
 # Run frontend production build
 npm run build
 ```
+
+### Deploy the backend to Render
+
+The repository includes a Render Blueprint (`render.yaml`) for the API Gateway, four Spring Boot services, and a shared PostgreSQL database. Each Java service is built from its Dockerfile with Java 21. Database and JWT credentials are injected by Render; no production credentials belong in Git.
+
+1. In Render, choose **New → Blueprint**, connect this GitHub repository, and select the `master` branch.
+2. Review the Blueprint resources and current plan/pricing shown by Render, then create them. The sample Blueprint selects free plans for a student demo. Free web services sleep after inactivity, and free Postgres expires after 30 days; this setup is for a short-lived demo, not production data.
+3. During setup, enter your own strong student and admin seed passwords when Render prompts you. These create the initial demo accounts without putting passwords in the repository. Keep these passwords private.
+4. Wait until the database and all five services show **Live**. Render assigns the Gateway a public `onrender.com` URL.
+5. In the Gateway service's environment settings, set `CORS_ALLOWED_ORIGINS` to the exact Vercel site origin (for example, `https://your-portal.vercel.app`) and save. The Blueprint initially allows Vercel preview domains so the first deployment can be connected; narrow this to your own Vercel domain after it is created.
+
+### Deploy the frontend to Vercel
+
+1. In Vercel, import `SureshKumar007tech/Student-Learning-portal` from GitHub. `vercel.json` selects the Vite build and SPA route fallback.
+2. Set the project environment variable `VITE_API_BASE_URL` to `https://<gateway-host>.onrender.com/api/v1` for Production (and Preview if needed), then deploy.
+3. Copy the Vercel production domain into Render's `CORS_ALLOWED_ORIGINS` as described above and redeploy the Gateway.
+
+The frontend uses the API Gateway; it must not point to `localhost` after deployment. The Render Blueprint seeds sample course/resource/event content and demo accounts using the passwords you enter during setup. After the first successful deploy, set `PORTAL_SEED_ENABLED=false` on each of the four data services to prevent additional demo records from being created on later restarts.
+
+The free-tier Blueprint exposes each microservice on a public URL because free web services cannot receive private-network traffic. Protected writes rely on the shared gateway secret and service authorization checks. For production, move the four downstream services to private paid services and route the Gateway over Render's private network.
 
 ---
 
